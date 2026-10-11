@@ -1,9 +1,6 @@
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
-// Palitan ang pangalan para hindi mag-clash sa global variable ng CDN
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 function switchTab(tab) {
     const loginTab = document.getElementById('loginTab');
     const signupTab = document.getElementById('signupTab');
@@ -42,10 +39,11 @@ async function handleLogin(event) {
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
 
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email,
-        password,
-    });
+    // Sa halip na mag-declare ng bagong const, direktang gamitin ang window.supabase
+const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signInWithPassword({
+    email,
+    password,
+});
 
     if (error) {
         // Kapag mali ang password o email, ipapakita ang error message rito
