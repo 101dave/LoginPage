@@ -1,6 +1,8 @@
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 function switchTab(tab) {
     const loginTab = document.getElementById('loginTab');
     const signupTab = document.getElementById('signupTab');
@@ -64,7 +66,7 @@ async function handleSignup(event) {
     const email = document.getElementById('signupEmail').value;
     const password = document.getElementById('signupPassword').value;
 
-    const { data, error } = await supabaseClient.auth.signUp({
+    const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signUp({
         email,
         password,
     });
