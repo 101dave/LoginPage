@@ -63,9 +63,16 @@ async function handleSignup(event) {
     event.preventDefault();
     hideAlert();
 
+    const submitBtn = event.target.querySelector('[type="submit"]') || event.submitter;
     const email = document.getElementById('signupEmail').value;
     const password = document.getElementById('signupPassword').value;
 
+    // Disable button and show loading state
+    submitBtn.disabled = true;
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Creating Account...';
+
+    try{
     const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signUp({
         email,
         password,
@@ -75,5 +82,11 @@ async function handleSignup(event) {
         showAlert(error.message, 'error');
     } else {
         showAlert('Signup successful! Please check your email for verification.', 'success');
+    }
+    }
+   finally {
+        // Re-enable button
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
     }
 }
