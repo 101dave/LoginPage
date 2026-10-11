@@ -54,7 +54,7 @@ const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABAS
         // Kapag tama ang password, magre-redirect sa iyong external website
         showAlert('Login successful! Redirecting...', 'success');
         setTimeout(() => {
-            window.location.href = 'https://101dave.github.io/EbaleAllanDave/';
+            window.location.href = 'main.html';
         }, 1000);
     }
 }

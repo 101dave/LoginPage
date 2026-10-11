@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schola - Student & Attendance Management</title>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Supabase JS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>    
+    <!-- Pure CSS -->
+    <link rel="stylesheet" href="main.css">
+</head>
+<body>
+
+    <!-- Top Navigation -->
+    <header class="navbar">
+        <div class="nav-container">
+            <div class="brand">
+                <div class="brand-logo">S</div>
+                <div>
+                    <h1>Schola</h1>
+                    <span>Attendance & Directory</span>
+                </div>
+            </div>
+
+            <!-- Nav Tabs -->
+            <nav class="nav-tabs desktop-nav">
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="tab-btn active">Dashboard</button>
+                <button onclick="switchTab('directory')" id="nav-directory" class="tab-btn">Directory</button>
+                <button onclick="switchTab('attendance')" id="nav-attendance" class="tab-btn">Take Attendance</button>
+                <button onclick="switchTab('history')" id="nav-history" class="tab-btn">History & Reports</button>
+            </nav>
+
+            <div class="nav-actions">
+                <button onclick="openAddSectionModal()" class="btn btn-secondary mobile-hide">
+                    <i data-lucide="folder-plus"></i>
+                    <span>Add Section</span>
+                </button>
+                <button onclick="openAddStudentModal()" class="btn btn-primary">
+                    <i data-lucide="user-plus"></i>
+                    <span>Add Student</span>
+                </button>
+            </div>
+        </div>
+        <!-- Mobile Sub-nav -->
+        <div class="mobile-nav">
+            <button onclick="switchTab('dashboard')" id="mob-nav-dashboard" class="mob-tab active">Dashboard</button>
+            <button onclick="switchTab('directory')" id="mob-nav-directory" class="mob-tab">Directory</button>
+            <button onclick="switchTab('attendance')" id="mob-nav-attendance" class="mob-tab">Take Attendance</button>
+            <button onclick="switchTab('history')" id="mob-nav-history" class="mob-tab">History</button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-container">
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+
+        <!-- ================= DASHBOARD VIEW ================= -->
+        <section id="view-dashboard" class="view-section">
+            <!-- Summary Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div>
+                        <p class="stat-label">Total Students</p>
+                        <h3 id="stat-total" class="stat-value">0</h3>
+                    </div>
+                    <div class="stat-icon"><i data-lucide="users"></i></div>
+                </div>
+                <div class="stat-card">
+                    <div>
+                        <p class="stat-label">Present Today</p>
+                        <h3 id="stat-present" class="stat-value text-emerald">0</h3>
+                    </div>
+                    <div class="stat-icon icon-emerald"><i data-lucide="user-check"></i></div>
+                </div>
+                <div class="stat-card">
+                    <div>
+                        <p class="stat-label">Absent Today</p>
+                        <h3 id="stat-absent" class="stat-value text-rose">0</h3>
+                    </div>
+                    <div class="stat-icon icon-rose"><i data-lucide="user-x"></i></div>
+                </div>
+                <div class="stat-card">
+                    <div>
+                        <p class="stat-label">Overall Rate</p>
+                        <h3 id="stat-rate" class="stat-value">0%</h3>
+                    </div>
+                    <div class="stat-icon"><i data-lucide="pie-chart"></i></div>
+                </div>
+            </div>
+
+            <!-- Attendance Percentage per Grade & Section -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>Attendance Breakdown by Section</h2>
+                        <p>Real-time attendance rates per grade and section</p>
+                    </div>
+                    <span id="dash-date-label" class="badge badge-gray">Today</span>
+                </div>
+                <div id="section-breakdown-container" class="breakdown-list">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= STUDENT DIRECTORY VIEW ================= -->
+        <section id="view-directory" class="view-section hidden">
+            <!-- Header & Search -->
+            <div class="section-header-flex">
+                <div>
+                    <h2>Student Directory</h2>
+                    <p>Manage student records organized by section</p>
+                </div>
+                <div class="search-action-group">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="directory-search" oninput="renderDirectory()" placeholder="Search name or ID...">
+                    </div>
+                    <button onclick="openAddSectionModal()" class="btn btn-secondary desktop-hide">Add Section</button>
+                </div>
+            </div>
+
+            <!-- Section Tabs Filter -->
+            <div id="directory-section-tabs" class="section-tabs">
+                <!-- Populated via JS -->
+            </div>
+
+            <!-- Section Info Banner & Student Table -->
+            <div class="card">
+                <div id="directory-section-banner" class="directory-banner">
+                    <!-- Populated via JS -->
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Student</th>
+                                <th>Student ID</th>
+                                <th>Email</th>
+                                <th>Overall Attendance</th>
+                                <th class="text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="directory-table-body">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= ATTENDANCE VIEW ================= -->
+        <section id="view-attendance" class="view-section hidden">
+            <div class="card filter-card">
+                <div class="filter-flex">
+                    <div class="filter-inputs">
+                        <div class="input-group">
+                            <label>Select Date</label>
+                            <input type="date" id="att-date" onchange="loadAttendanceSheet()" class="form-control">
+                        </div>
+                        <div class="input-group">
+                            <label>Select Section</label>
+                            <select id="att-section" onchange="loadAttendanceSheet()" class="form-control">
+                                <!-- Populated via JS -->
+                            </select>
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle">All Present</button>
+                        <button onclick="saveAttendance()" class="btn btn-primary">Save Attendance</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attendance Sheet Table -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>Attendance Sheet</h2>
+                        <p id="att-sheet-subtitle">Mark student status for the selected date</p>
+                    </div>
+                    <div class="legend-group">
+                        <span><span class="dot dot-emerald"></span>Present</span>
+                        <span><span class="dot dot-rose"></span>Absent</span>
+                        <span><span class="dot dot-amber"></span>Late</span>
+                        <span><span class="dot dot-blue"></span>Excused</span>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Student</th>
+                                <th>Student ID</th>
+                                <th class="text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="att-table-body">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= HISTORY VIEW ================= -->
+        <section id="view-history" class="view-section hidden">
+            <div class="card filter-card">
+                <div class="filter-flex">
+                    <div>
+                        <h2>Attendance History & Reports</h2>
+                        <p>View logs by date or individual student performance</p>
+                    </div>
+                    <div class="history-controls">
+                        <select id="history-filter-type" onchange="toggleHistoryMode()" class="form-control">
+                            <option value="date">Filter by Date</option>
+                            <option value="student">Filter by Student</option>
+                        </select>
+                        <div id="history-input-date-wrapper">
+                            <input type="date" id="history-date" onchange="renderHistory()" class="form-control">
+                        </div>
+                        <div id="history-input-student-wrapper" class="hidden">
+                            <select id="history-student-select" onchange="renderHistory()" class="form-control">
+                                <!-- Populated via JS -->
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Results -->
+            <div id="history-results" class="card">
+                <!-- Populated via JS -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ================= MODALS ================= -->
+
+    <!-- Add/Edit Student Modal -->
+    <div id="modal-student" class="modal-backdrop hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="student-modal-title">Add New Student</h3>
+                <button onclick="closeModal('modal-student')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <form id="form-student" onsubmit="handleStudentSubmit(event)" class="modal-form">
+                <input type="hidden" id="student-edit-id">
+                <div class="input-group">
+                    <label>Full Name</label>
+                    <input type="text" id="stud-name" required placeholder="e.g. Juan Dela Cruz" class="form-control">
+                </div>
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Student ID</label>
+                        <input type="text" id="stud-id" required placeholder="e.g. STU-1005" class="form-control">
+                    </div>
+                    <div class="input-group">
+                        <label>Grade & Section</label>
+                        <select id="stud-section" required class="form-control">
+                            <!-- Populated via JS -->
+                        </select>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>Email Address</label>
+                    <input type="email" id="stud-email" required placeholder="juan@example.com" class="form-control">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-student')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Student</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Section Modal -->
+    <div id="modal-section" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>Add New Section</h3>
+                <button onclick="closeModal('modal-section')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <form onsubmit="handleSectionSubmit(event)" class="modal-form">
+                <div class="input-group">
+                    <label>Grade Level & Section Name</label>
+                    <input type="text" id="new-section-name" required placeholder="e.g. Grade 11 - Sapphire" class="form-control">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-section')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Section</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Custom App Script -->
+    <script src="main.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login / Signup</title>
+    <title>Welcome Back — Sign In</title>
     <link rel="stylesheet" href="style.css">
     <!-- Supabase JS SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -11,6 +11,11 @@
 <body>
     <div class="container">
         <div class="card">
+            <!-- Brand / Header -->
+            <div class="card-header">
+                <h2>Welcome Back</h2>
+            </div>
+
             <div class="tabs">
                 <button id="loginTab" class="tab active" onclick="switchTab('login')">Sign In</button>
                 <button id="signupTab" class="tab" onclick="switchTab('signup')">Create Account</button>
@@ -21,12 +26,12 @@
             <!-- Login Form -->
             <form id="loginForm" class="form active" onsubmit="handleLogin(event)">
                 <div class="input-group">
-                    <label for="loginEmail">Email</label>
-                    <input type="email" id="loginEmail" required placeholder="you@example.com">
+                    <label for="loginEmail">Email address</label>
+                    <input type="email" id="loginEmail" required placeholder="you@example.com" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <label for="loginPassword">Password</label>
-                    <input type="password" id="loginPassword" required placeholder="••••••••">
+                    <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
                 </div>
                 <button type="submit" class="btn">Sign In</button>
             </form>
@@ -34,12 +39,12 @@
             <!-- Signup Form -->
             <form id="signupForm" class="form" onsubmit="handleSignup(event)">
                 <div class="input-group">
-                    <label for="signupEmail">Email</label>
-                    <input type="email" id="signupEmail" required placeholder="you@example.com">
+                    <label for="signupEmail">Email address</label>
+                    <input type="email" id="signupEmail" required placeholder="you@example.com" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <label for="signupPassword">Password</label>
-                    <input type="password" id="signupPassword" required placeholder="••••••••">
+                    <input type="password" id="signupPassword" required placeholder="••••••••" autocomplete="new-password">
                 </div>
                 <button type="submit" class="btn">Create Account</button>
             </form>
