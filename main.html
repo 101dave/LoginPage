@@ -24,7 +24,7 @@
                 </div>
             </div>
 
-            <!-- Nav Tabs -->
+            <!-- Nav Tabs (Desktop) -->
             <nav class="nav-tabs desktop-nav">
                 <button onclick="switchTab('dashboard')" id="nav-dashboard" class="tab-btn active">Dashboard</button>
                 <button onclick="switchTab('directory')" id="nav-directory" class="tab-btn">Directory</button>
@@ -39,28 +39,42 @@
                 </button>
                 <button onclick="openAddStudentModal()" class="btn btn-primary">
                     <i data-lucide="user-plus"></i>
-                    <span>Add Student</span>
+                    <span class="mobile-hide">Add Student</span>
+                </button>
+                <button onclick="handleLogout()" class="btn" style="background-color: var(--rose-bg); color: var(--rose-text); border-color: var(--rose-border);">
+                    <i data-lucide="log-out"></i>
+                    <span class="mobile-hide">Logout</span>
+                </button>
+                <!-- Hamburger Toggle Button (Mobile Only) -->
+                <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide">
+                    <i data-lucide="menu"></i>
                 </button>
             </div>
         </div>
-        <!-- Mobile Sub-nav -->
-        <div class="mobile-nav">
-            <button onclick="switchTab('dashboard')" id="mob-nav-dashboard" class="mob-tab active">Dashboard</button>
-            <button onclick="switchTab('directory')" id="mob-nav-directory" class="mob-tab">Directory</button>
-            <button onclick="switchTab('attendance')" id="mob-nav-attendance" class="mob-tab">Take Attendance</button>
-            <button onclick="switchTab('history')" id="mob-nav-history" class="mob-tab">History</button>
+
+        <!-- Mobile Dropdown Hamburger Menu -->
+        <div id="mobileMenu" class="mobile-dropdown-menu hidden">
+            <button onclick="switchTab('dashboard'); toggleMobileMenu()" id="mob-nav-dashboard" class="mob-menu-item active">Dashboard</button>
+            <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">Directory</button>
+            <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">Take Attendance</button>
+            <button onclick="switchTab('history'); toggleMobileMenu()" id="mob-nav-history" class="mob-menu-item">History & Reports</button>
+            <div class="mob-menu-divider"></div>
+            <button onclick="openAddSectionModal(); toggleMobileMenu()" class="mob-menu-item">
+                <i data-lucide="folder-plus" style="width:14px; height:14px;"></i> Add Section
+            </button>
+            <button onclick="handleLogout()" class="mob-menu-item" style="color: var(--rose-text);">
+                <i data-lucide="log-out" style="width:14px; height:14px;"></i> Logout
+            </button>
         </div>
     </header>
 
     <!-- Main Container -->
     <main class="main-container">
-
         <!-- Toast Notifications -->
         <div id="toast-container" class="toast-container"></div>
 
         <!-- ================= DASHBOARD VIEW ================= -->
         <section id="view-dashboard" class="view-section">
-            <!-- Summary Stats -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div>
@@ -92,7 +106,6 @@
                 </div>
             </div>
 
-            <!-- Attendance Percentage per Grade & Section -->
             <div class="card">
                 <div class="card-header">
                     <div>
@@ -101,15 +114,12 @@
                     </div>
                     <span id="dash-date-label" class="badge badge-gray">Today</span>
                 </div>
-                <div id="section-breakdown-container" class="breakdown-list">
-                    <!-- Populated via JS -->
-                </div>
+                <div id="section-breakdown-container" class="breakdown-list"></div>
             </div>
         </section>
 
         <!-- ================= STUDENT DIRECTORY VIEW ================= -->
         <section id="view-directory" class="view-section hidden">
-            <!-- Header & Search -->
             <div class="section-header-flex">
                 <div>
                     <h2>Student Directory</h2>
@@ -124,16 +134,10 @@
                 </div>
             </div>
 
-            <!-- Section Tabs Filter -->
-            <div id="directory-section-tabs" class="section-tabs">
-                <!-- Populated via JS -->
-            </div>
+            <div id="directory-section-tabs" class="section-tabs"></div>
 
-            <!-- Section Info Banner & Student Table -->
             <div class="card">
-                <div id="directory-section-banner" class="directory-banner">
-                    <!-- Populated via JS -->
-                </div>
+                <div id="directory-section-banner" class="directory-banner"></div>
                 <div class="table-responsive">
                     <table class="data-table">
                         <thead>
@@ -145,9 +149,7 @@
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="directory-table-body">
-                            <!-- Populated via JS -->
-                        </tbody>
+                        <tbody id="directory-table-body"></tbody>
                     </table>
                 </div>
             </div>
@@ -164,19 +166,16 @@
                         </div>
                         <div class="input-group">
                             <label>Select Section</label>
-                            <select id="att-section" onchange="loadAttendanceSheet()" class="form-control">
-                                <!-- Populated via JS -->
-                            </select>
+                            <select id="att-section" onchange="loadAttendanceSheet()" class="form-control"></select>
                         </div>
                     </div>
                     <div class="filter-actions">
-                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle">All Present</button>
-                        <button onclick="saveAttendance()" class="btn btn-primary">Save Attendance</button>
+                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle" style="flex: 1;">All Present</button>
+                        <button onclick="saveAttendance()" class="btn btn-primary" style="flex: 1;">Save</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Attendance Sheet Table -->
             <div class="card">
                 <div class="card-header">
                     <div>
@@ -199,9 +198,7 @@
                                 <th class="text-center">Status</th>
                             </tr>
                         </thead>
-                        <tbody id="att-table-body">
-                            <!-- Populated via JS -->
-                        </tbody>
+                        <tbody id="att-table-body"></tbody>
                     </table>
                 </div>
             </div>
@@ -220,29 +217,20 @@
                             <option value="date">Filter by Date</option>
                             <option value="student">Filter by Student</option>
                         </select>
-                        <div id="history-input-date-wrapper">
+                        <div id="history-input-date-wrapper" style="width: 100%;">
                             <input type="date" id="history-date" onchange="renderHistory()" class="form-control">
                         </div>
-                        <div id="history-input-student-wrapper" class="hidden">
-                            <select id="history-student-select" onchange="renderHistory()" class="form-control">
-                                <!-- Populated via JS -->
-                            </select>
+                        <div id="history-input-student-wrapper" class="hidden" style="width: 100%;">
+                            <select id="history-student-select" onchange="renderHistory()" class="form-control"></select>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- History Results -->
-            <div id="history-results" class="card">
-                <!-- Populated via JS -->
-            </div>
+            <div id="history-results" class="card"></div>
         </section>
-
     </main>
 
-    <!-- ================= MODALS ================= -->
-
-    <!-- Add/Edit Student Modal -->
+    <!-- Modals -->
     <div id="modal-student" class="modal-backdrop hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -262,9 +250,7 @@
                     </div>
                     <div class="input-group">
                         <label>Grade & Section</label>
-                        <select id="stud-section" required class="form-control">
-                            <!-- Populated via JS -->
-                        </select>
+                        <select id="stud-section" required class="form-control"></select>
                     </div>
                 </div>
                 <div class="input-group">
@@ -279,7 +265,6 @@
         </div>
     </div>
 
-    <!-- Add Section Modal -->
     <div id="modal-section" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
@@ -299,7 +284,6 @@
         </div>
     </div>
 
-    <!-- Custom Delete Student Confirmation Modal (English Text) -->
     <div id="modal-delete-student" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
@@ -318,7 +302,6 @@
         </div>
     </div>
 
-    <!-- Custom App Script -->
     <script src="main.js"></script>
 </body>
 </html>

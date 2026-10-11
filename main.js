@@ -1,16 +1,24 @@
-// Supabase Configuration[cite: 1, 6]
+// Add at the top of DOMContentLoaded or initial execution in main.js
+async function checkAuthGuard() {
+    const { data: { user }, error } = await supabaseClient.auth.getUser();
+    if (error || !user) {
+        window.location.href = 'index.html';
+    }
+}
+checkAuthGuard();
+
+// Supabase Configuration[cite: 1, 5]
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let sections = JSON.parse(localStorage.getItem('schola_sections')) || [];
+let sections = [];
 let students = []; 
-let attendanceRecords = JSON.parse(localStorage.getItem('schola_attendance')) || {};
-let activeDirectorySection = sections[0] || "";
+let attendanceRecords = {};
+let activeDirectorySection = "";
 let studentToDeleteId = null;
 
-// Initialize App
 document.addEventListener('DOMContentLoaded', async () => {
     const todayStr = new Date().toISOString().split('T')[0];
     const attDateEl = document.getElementById('att-date');
@@ -20,21 +28,36 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     populateDropdowns();
     await fetchStudentsFromSupabase();
-    
     lucide.createIcons();
 });
 
-// Kumuha ng mga Estudyante mula sa Supabase
+// Toggle Mobile Hamburger Menu
+function toggleMobileMenu() {
+    const menu = document.getElementById('mobileMenu');
+    if (menu) {
+        menu.classList.toggle('hidden');
+    }
+}
+
 async function fetchStudentsFromSupabase() {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) return;
+
+    sections = JSON.parse(localStorage.getItem(`schola_sections_${user.id}`)) || [];
+    attendanceRecords = JSON.parse(localStorage.getItem(`schola_attendance_${user.id}`)) || {};
+    activeDirectorySection = sections[0] || "";
+
     const { data, error } = await supabaseClient
         .from('students')
-        .select('*');
+        .select('*')
+        .eq('user_id', user.id);
 
     if (error) {
         showToast("Error sa pag-load ng mga estudyante", "error");
         console.error(error);
     } else {
         students = data || [];
+        populateDropdowns();
         renderDashboard();
         renderDirectory();
         loadAttendanceSheet();
@@ -42,7 +65,6 @@ async function fetchStudentsFromSupabase() {
     }
 }
 
-// Toast Notification System
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     if(!container) return;
@@ -59,7 +81,6 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
-// Navigation Switcher
 function switchTab(tabName) {
     ['dashboard', 'directory', 'attendance', 'history'].forEach(t => {
         const viewEl = document.getElementById(`view-${t}`);
@@ -83,7 +104,6 @@ function switchTab(tabName) {
     if(tabName === 'history') renderHistory();
 }
 
-// Dropdown Populate Helpers
 function populateDropdowns() {
     const attSelect = document.getElementById('att-section');
     const studSelect = document.getElementById('stud-section');
@@ -103,7 +123,6 @@ function populateDropdowns() {
     });
 }
 
-// ================= DASHBOARD LOGIC =================
 function renderDashboard() {
     const todayStr = new Date().toISOString().split('T')[0];
     const dateLabel = document.getElementById('dash-date-label');
@@ -115,7 +134,6 @@ function renderDashboard() {
     let presentCount = 0;
     let absentCount = 0;
 
-    // Kunin lamang ang status ng mga estudyanteng aktwal na nasa 'students' list
     students.forEach(s => {
         const status = todayAtt[s.id];
         if(status === 'Present' || status === 'Late' || status === 'Excused') {
@@ -179,7 +197,6 @@ function renderDashboard() {
     lucide.createIcons();
 }
 
-// ================= DIRECTORY LOGIC =================
 function renderDirectory() {
     const tabsContainer = document.getElementById('directory-section-tabs');
     const bannerContainer = document.getElementById('directory-section-banner');
@@ -194,12 +211,7 @@ function renderDirectory() {
     if (sections.length === 0) {
         activeDirectorySection = "";
         tabsContainer.innerHTML = `<span style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No sections available.</span>`;
-        bannerContainer.innerHTML = `
-            <div>
-                <h3>No Section Selected</h3>
-                <p>Please add a section first</p>
-            </div>
-        `;
+        bannerContainer.innerHTML = `<div><h3>No Section Selected</h3><p>Please add a section first</p></div>`;
         tbody.innerHTML = `<tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No sections or students found.</td></tr>`;
         return;
     }
@@ -263,7 +275,6 @@ function renderDirectory() {
     lucide.createIcons();
 }
 
-// ================= ATTENDANCE LOGIC =================
 function loadAttendanceSheet() {
     const dateEl = document.getElementById('att-date');
     const sectionEl = document.getElementById('att-section');
@@ -295,11 +306,7 @@ function loadAttendanceSheet() {
         const currentStatus = attendanceRecords[date][s.id] || 'Present';
         tbody.innerHTML += `
             <tr>
-                <td>
-                    <div class="student-cell">
-                        <span style="font-weight:500;">${s.name}</span>
-                    </div>
-                </td>
+                <td><div class="student-cell"><span style="font-weight:500;">${s.name}</span></div></td>
                 <td class="font-mono">${s.id}</td>
                 <td class="text-center">
                     <div class="status-pill-group">
@@ -314,13 +321,42 @@ function loadAttendanceSheet() {
     });
 }
 
-function setAttendanceStatus(date, studentId, status) {
+async function setAttendanceStatus(date, studentId, status) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+
     if(!attendanceRecords[date]) attendanceRecords[date] = {};
     attendanceRecords[date][studentId] = status;
+    
+    localStorage.setItem(`schola_attendance_${user.id}`, JSON.stringify(attendanceRecords));
     loadAttendanceSheet();
 }
 
-// ================= HISTORY LOGIC =================
+function markAllAttendance(status) {
+    const dateEl = document.getElementById('att-date');
+    const sectionEl = document.getElementById('att-section');
+    if(!dateEl || !sectionEl) return;
+    
+    const date = dateEl.value;
+    const section = sectionEl.value;
+    const secStudents = students.filter(s => s.section === section);
+
+    if(!attendanceRecords[date]) attendanceRecords[date] = {};
+    secStudents.forEach(s => {
+        attendanceRecords[date][s.id] = status;
+    });
+
+    loadAttendanceSheet();
+    showToast(`Marked all as ${status}!`);
+}
+
+async function saveAttendance() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+    localStorage.setItem(`schola_attendance_${user.id}`, JSON.stringify(attendanceRecords));
+    showToast("Attendance saved successfully!");
+}
+
 function toggleHistoryMode() {
     const mode = document.getElementById('history-filter-type').value;
     if(mode === 'date') {
@@ -348,27 +384,27 @@ function populateHistoryStudentSelect() {
 }
 
 function renderHistory() {
-    // Basic history render placeholder
+    const results = document.getElementById('history-results');
+    if(!results) return;
+    results.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px;">History report view active.</div>`;
 }
 
-// ================= MODALS & CRUD ACTIONS =================
 function openAddSectionModal() {
     const modal = document.getElementById('modal-section');
     if (modal) {
         modal.classList.remove('hidden');
         const input = document.getElementById('new-section-name');
-        if(input) {
-            input.value = '';
-            input.focus();
-        }
+        if(input) { input.value = ''; input.focus(); }
     }
 }
 
-function handleSectionSubmit(event) {
+async function handleSectionSubmit(event) {
     event.preventDefault();
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+
     const sectionInput = document.getElementById('new-section-name');
     const newSection = sectionInput.value.trim();
-
     if (!newSection) return;
 
     if (sections.includes(newSection)) {
@@ -377,24 +413,24 @@ function handleSectionSubmit(event) {
     }
 
     sections.push(newSection);
-    localStorage.setItem('schola_sections', JSON.stringify(sections));
+    localStorage.setItem(`schola_sections_${user.id}`, JSON.stringify(sections));
 
-    if (!activeDirectorySection) {
-        activeDirectorySection = newSection;
-    }
+    if (!activeDirectorySection) activeDirectorySection = newSection;
 
     populateDropdowns();
     renderDashboard();
     renderDirectory();
-    
     closeModal('modal-section');
     showToast("Section successfully added!");
 }
 
-function deleteSection(sectionName) {
+async function deleteSection(sectionName) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+
     if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
         sections = sections.filter(s => s !== sectionName);
-        localStorage.setItem('schola_sections', JSON.stringify(sections));
+        localStorage.setItem(`schola_sections_${user.id}`, JSON.stringify(sections));
 
         if (activeDirectorySection === sectionName) {
             activeDirectorySection = sections[0] || "";
@@ -432,14 +468,20 @@ function closeModal(modalId) {
 
 async function handleStudentSubmit(event) {
     event.preventDefault();
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+        showToast("Kailangan mong mag-login muli.", "error");
+        return;
+    }
+
     const name = document.getElementById('stud-name').value.trim();
     const id = document.getElementById('stud-id').value.trim();
     const section = document.getElementById('stud-section').value;
     const email = document.getElementById('stud-email').value.trim();
 
-    const { data, error } = await supabaseClient
+    const { error } = await supabaseClient
         .from('students')
-        .insert([{ id, name, section, email }]);
+        .insert([{ id, name, section, email, user_id: user.id }]);
 
     if (error) {
         showToast(error.message, "error");
@@ -450,28 +492,23 @@ async function handleStudentSubmit(event) {
     }
 }
 
-// Buksan ang Custom Delete Modal sa halip na browser alert/confirm
 function deleteStudent(id) {
     const student = students.find(s => s.id === id);
     if (!student) return;
 
     studentToDeleteId = id;
-    
     const nameEl = document.getElementById('delete-student-name');
     if (nameEl) nameEl.innerText = student.name;
 
     const confirmBtn = document.getElementById('confirm-delete-btn');
     if (confirmBtn) {
-        confirmBtn.onclick = async () => {
-            await confirmDeleteStudent();
-        };
+        confirmBtn.onclick = async () => { await confirmDeleteStudent(); };
     }
 
     document.getElementById('modal-delete-student').classList.remove('hidden');
     lucide.createIcons();
 }
 
-// Aktwal na magde-delete kapag pinindot ang Delete sa Modal
 async function confirmDeleteStudent() {
     if (!studentToDeleteId) return;
 
@@ -498,6 +535,15 @@ async function confirmDeleteStudent() {
         confirmBtn.disabled = false;
         confirmBtn.innerText = "Delete";
     }
-    
     studentToDeleteId = null;
+}
+
+async function handleLogout() {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) {
+        showToast("Error sa pag-logout", "error");
+    } else {
+        showToast("Logged out successfully! Redirecting...", "success");
+        setTimeout(() => { window.location.href = 'index.html'; }, 1000);
+    }
 }
