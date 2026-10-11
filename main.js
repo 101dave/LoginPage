@@ -53,7 +53,7 @@ async function fetchStudentsFromSupabase() {
         .eq('user_id', user.id);
 
     if (error) {
-        showToast("Error sa pag-load ng mga estudyante", "error");
+        showToast("Error loading students", "error");
         console.error(error);
     } else {
         students = data || [];
@@ -470,7 +470,7 @@ async function handleStudentSubmit(event) {
     event.preventDefault();
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
-        showToast("Kailangan mong mag-login muli.", "error");
+        showToast("You need to log in again.", "error");
         return;
     }
 
@@ -541,7 +541,7 @@ async function confirmDeleteStudent() {
 async function handleLogout() {
     const { error } = await supabaseClient.auth.signOut();
     if (error) {
-        showToast("Error sa pag-logout", "error");
+        showToast("Error during logout", "error");
     } else {
         showToast("Logged out successfully! Redirecting...", "success");
         setTimeout(() => { window.location.href = 'index.html'; }, 1000);
