@@ -1,22 +1,14 @@
-// Supabase Configuration galing sa iyong proyekto[cite: 1, 6]
+// Supabase Configuration[cite: 1, 6]
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Initial Sections Setup
-const DEFAULT_SECTIONS = [
-    "Grade 10 - Newton",
-    "Grade 10 - Einstein",
-    "Grade 11 - STEM A",
-    "Grade 12 - Rizal"
-];
-
-let sections = JSON.parse(localStorage.getItem('schola_sections')) || DEFAULT_SECTIONS;
-let students = []; // Dito natin ila-load ang mga estudyante mula sa Supabase
+let sections = JSON.parse(localStorage.getItem('schola_sections')) || [];
+let students = []; 
 let attendanceRecords = JSON.parse(localStorage.getItem('schola_attendance')) || {};
-
 let activeDirectorySection = sections[0] || "";
+let studentToDeleteId = null;
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', async () => {
@@ -27,7 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(histDateEl) histDateEl.value = todayStr;
 
     populateDropdowns();
-    await fetchStudentsFromSupabase(); // Kunin ang mga estudyante sa Supabase
+    await fetchStudentsFromSupabase();
     
     lucide.createIcons();
 });
@@ -99,6 +91,12 @@ function populateDropdowns() {
     if(attSelect) attSelect.innerHTML = '';
     if(studSelect) studSelect.innerHTML = '';
 
+    if (sections.length === 0) {
+        if(attSelect) attSelect.innerHTML = `<option value="">No sections available</option>`;
+        if(studSelect) studSelect.innerHTML = `<option value="">No sections available</option>`;
+        return;
+    }
+
     sections.forEach(sec => {
         if(attSelect) attSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
         if(studSelect) studSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
@@ -117,11 +115,12 @@ function renderDashboard() {
     let presentCount = 0;
     let absentCount = 0;
 
-    Object.values(todayAtt).forEach(status => {
+    // Kunin lamang ang status ng mga estudyanteng aktwal na nasa 'students' list
+    students.forEach(s => {
+        const status = todayAtt[s.id];
         if(status === 'Present' || status === 'Late' || status === 'Excused') {
-            if(status === 'Present' || status === 'Late') presentCount++;
-        }
-        if(status === 'Absent') {
+            presentCount++;
+        } else if(status === 'Absent') {
             absentCount++;
         }
     });
@@ -141,6 +140,11 @@ function renderDashboard() {
     const breakdownContainer = document.getElementById('section-breakdown-container');
     if(!breakdownContainer) return;
     breakdownContainer.innerHTML = '';
+
+    if (sections.length === 0) {
+        breakdownContainer.innerHTML = `<div style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No sections created yet. Click "Add Section" to get started.</div>`;
+        return;
+    }
 
     sections.forEach(sec => {
         const secStudents = students.filter(s => s.section === sec);
@@ -186,6 +190,20 @@ function renderDirectory() {
     if(!tabsContainer || !bannerContainer || !tbody) return;
 
     tabsContainer.innerHTML = '';
+    
+    if (sections.length === 0) {
+        activeDirectorySection = "";
+        tabsContainer.innerHTML = `<span style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No sections available.</span>`;
+        bannerContainer.innerHTML = `
+            <div>
+                <h3>No Section Selected</h3>
+                <p>Please add a section first</p>
+            </div>
+        `;
+        tbody.innerHTML = `<tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No sections or students found.</td></tr>`;
+        return;
+    }
+
     if(!sections.includes(activeDirectorySection) && sections.length > 0) {
         activeDirectorySection = sections[0];
     }
@@ -210,7 +228,10 @@ function renderDirectory() {
             <h3>${activeDirectorySection}</h3>
             <p>Showing ${sectionStudents.length} student(s) in this section</p>
         </div>
-        <button onclick="openAddStudentModalForSection('${activeDirectorySection}')" class="btn btn-secondary">Add to Section</button>
+        <div style="display: flex; gap: 8px;">
+            <button onclick="openAddStudentModalForSection('${activeDirectorySection}')" class="btn btn-secondary">Add to Section</button>
+            <button onclick="deleteSection('${activeDirectorySection}')" class="btn" style="background-color: var(--rose-bg); color: var(--rose-text); border-color: var(--rose-border);">Delete Section</button>
+        </div>
     `;
 
     tbody.innerHTML = '';
@@ -252,6 +273,12 @@ function loadAttendanceSheet() {
     if(!dateEl || !sectionEl || !tbody) return;
     const date = dateEl.value;
     const section = sectionEl.value;
+
+    if (!section || sections.length === 0) {
+        if(subtitle) subtitle.innerText = `No sections available`;
+        tbody.innerHTML = `<tr><td colspan="3" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">Please create a section first.</td></tr>`;
+        return;
+    }
 
     if(subtitle) subtitle.innerText = `Marking for ${section} on ${date}`;
     tbody.innerHTML = '';
@@ -311,6 +338,10 @@ function populateHistoryStudentSelect() {
     const select = document.getElementById('history-student-select');
     if(!select) return;
     select.innerHTML = '';
+    if(students.length === 0) {
+        select.innerHTML = `<option value="">No students available</option>`;
+        return;
+    }
     students.forEach(s => {
         select.innerHTML += `<option value="${s.id}">${s.name} (${s.section})</option>`;
     });
@@ -320,12 +351,73 @@ function renderHistory() {
     // Basic history render placeholder
 }
 
-// ================= MODALS & SUPABASE CRUD ACTIONS =================
+// ================= MODALS & CRUD ACTIONS =================
+function openAddSectionModal() {
+    const modal = document.getElementById('modal-section');
+    if (modal) {
+        modal.classList.remove('hidden');
+        const input = document.getElementById('new-section-name');
+        if(input) {
+            input.value = '';
+            input.focus();
+        }
+    }
+}
+
+function handleSectionSubmit(event) {
+    event.preventDefault();
+    const sectionInput = document.getElementById('new-section-name');
+    const newSection = sectionInput.value.trim();
+
+    if (!newSection) return;
+
+    if (sections.includes(newSection)) {
+        showToast("Section already exists!", "error");
+        return;
+    }
+
+    sections.push(newSection);
+    localStorage.setItem('schola_sections', JSON.stringify(sections));
+
+    if (!activeDirectorySection) {
+        activeDirectorySection = newSection;
+    }
+
+    populateDropdowns();
+    renderDashboard();
+    renderDirectory();
+    
+    closeModal('modal-section');
+    showToast("Section successfully added!");
+}
+
+function deleteSection(sectionName) {
+    if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
+        sections = sections.filter(s => s !== sectionName);
+        localStorage.setItem('schola_sections', JSON.stringify(sections));
+
+        if (activeDirectorySection === sectionName) {
+            activeDirectorySection = sections[0] || "";
+        }
+
+        populateDropdowns();
+        renderDashboard();
+        renderDirectory();
+        loadAttendanceSheet();
+        showToast("Section deleted successfully!");
+    }
+}
+
 function openAddStudentModal() {
+    if (sections.length === 0) {
+        showToast("Please add a section first before adding students.", "error");
+        openAddSectionModal();
+        return;
+    }
     document.getElementById('student-modal-title').innerText = "Add New Student";
     document.getElementById('form-student').reset();
     document.getElementById('student-edit-id').value = "";
-    document.getElementById('stud-section').value = activeDirectorySection;
+    document.getElementById('stud-section').value = activeDirectorySection || sections[0];
     document.getElementById('modal-student').classList.remove('hidden');
 }
 
@@ -338,7 +430,6 @@ function closeModal(modalId) {
     document.getElementById(modalId).classList.add('hidden');
 }
 
-// DITO MAPUPUNTA ANG SUPABASE INSERT KAPAG NAG-ADD NG STUDENT
 async function handleStudentSubmit(event) {
     event.preventDefault();
     const name = document.getElementById('stud-name').value.trim();
@@ -346,7 +437,6 @@ async function handleStudentSubmit(event) {
     const section = document.getElementById('stud-section').value;
     const email = document.getElementById('stud-email').value.trim();
 
-    // I-save sa Supabase 'students' table
     const { data, error } = await supabaseClient
         .from('students')
         .insert([{ id, name, section, email }]);
@@ -356,23 +446,58 @@ async function handleStudentSubmit(event) {
     } else {
         showToast("Student successfully added to Supabase!");
         closeModal('modal-student');
-        await fetchStudentsFromSupabase(); // I-refresh ang listahan galing Supabase
+        await fetchStudentsFromSupabase();
     }
 }
 
-// SUPABASE DELETE FUNCTION
-async function deleteStudent(id) {
-    if(confirm("Sigurado ka bang gusto mong tanggalin ang estudyanteng ito?")) {
-        const { error } = await supabaseClient
-            .from('students')
-            .delete()
-            .eq('id', id);
+// Buksan ang Custom Delete Modal sa halip na browser alert/confirm
+function deleteStudent(id) {
+    const student = students.find(s => s.id === id);
+    if (!student) return;
 
-        if (error) {
-            showToast(error.message, "error");
-        } else {
-            showToast("Student deleted successfully!");
-            await fetchStudentsFromSupabase(); // I-refresh ang listahan
-        }
+    studentToDeleteId = id;
+    
+    const nameEl = document.getElementById('delete-student-name');
+    if (nameEl) nameEl.innerText = student.name;
+
+    const confirmBtn = document.getElementById('confirm-delete-btn');
+    if (confirmBtn) {
+        confirmBtn.onclick = async () => {
+            await confirmDeleteStudent();
+        };
     }
+
+    document.getElementById('modal-delete-student').classList.remove('hidden');
+    lucide.createIcons();
+}
+
+// Aktwal na magde-delete kapag pinindot ang Delete sa Modal
+async function confirmDeleteStudent() {
+    if (!studentToDeleteId) return;
+
+    const confirmBtn = document.getElementById('confirm-delete-btn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerText = "Deleting...";
+    }
+
+    const { error } = await supabaseClient
+        .from('students')
+        .delete()
+        .eq('id', studentToDeleteId);
+
+    if (error) {
+        showToast(error.message, "error");
+    } else {
+        showToast("Student deleted successfully!");
+        closeModal('modal-delete-student');
+        await fetchStudentsFromSupabase();
+    }
+
+    if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.innerText = "Delete";
+    }
+    
+    studentToDeleteId = null;
 }

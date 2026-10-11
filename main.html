@@ -299,6 +299,25 @@
         </div>
     </div>
 
+    <!-- Custom Delete Student Confirmation Modal (English Text) -->
+    <div id="modal-delete-student" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3 style="color: var(--rose-text); display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="alert-triangle"></i> Delete Student
+                </h3>
+                <button onclick="closeModal('modal-delete-student')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+                Are you sure you want to delete <strong id="delete-student-name" style="color: var(--text-main);"></strong>? This action cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-delete-student')" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="confirm-delete-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Custom App Script -->
     <script src="main.js"></script>
 </body>
