@@ -1,7 +1,8 @@
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Palitan ang pangalan para hindi mag-clash sa global variable ng CDN
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function switchTab(tab) {
     const loginTab = document.getElementById('loginTab');
@@ -41,7 +42,7 @@ async function handleLogin(event) {
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
         email,
         password,
     });
@@ -50,7 +51,7 @@ async function handleLogin(event) {
         // Kapag mali ang password o email, ipapakita ang error message rito
         showAlert('Incorrect email or password. Please try again.', 'error');
     } else {
-        // Kapag tama ang password, magre-redirect sa dashboard.html
+        // Kapag tama ang password, magre-redirect sa iyong external website
         showAlert('Login successful! Redirecting...', 'success');
         setTimeout(() => {
             window.location.href = 'https://101dave.github.io/EbaleAllanDave/';
@@ -65,7 +66,7 @@ async function handleSignup(event) {
     const email = document.getElementById('signupEmail').value;
     const password = document.getElementById('signupPassword').value;
 
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await supabaseClient.auth.signUp({
         email,
         password,
     });
