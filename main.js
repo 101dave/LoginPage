@@ -1,4 +1,4 @@
-// Add at the top of DOMContentLoaded or initial execution in main.js
+// Auth Guard para masigurong naka-login ang user
 async function checkAuthGuard() {
     const { data: { user }, error } = await supabaseClient.auth.getUser();
     if (error || !user) {
@@ -7,7 +7,7 @@ async function checkAuthGuard() {
 }
 checkAuthGuard();
 
-// Supabase Configuration[cite: 1, 5]
+// Supabase Configuration
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
@@ -26,7 +26,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(attDateEl) attDateEl.value = todayStr;
     if(histDateEl) histDateEl.value = todayStr;
 
-    populateDropdowns();
     await fetchStudentsFromSupabase();
     lucide.createIcons();
 });
@@ -39,30 +38,59 @@ function toggleMobileMenu() {
     }
 }
 
+// Fetch lahat ng data mula sa Supabase Cloud Database
 async function fetchStudentsFromSupabase() {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) return;
 
-    sections = JSON.parse(localStorage.getItem(`schola_sections_${user.id}`)) || [];
-    attendanceRecords = JSON.parse(localStorage.getItem(`schola_attendance_${user.id}`)) || {};
-    activeDirectorySection = sections[0] || "";
+    // 1. Kunin ang Sections mula sa Supabase
+    const { data: secData, error: secError } = await supabaseClient
+        .from('sections')
+        .select('name')
+        .eq('user_id', user.id);
 
-    const { data, error } = await supabaseClient
+    if (!secError && secData) {
+        sections = secData.map(s => s.name);
+    }
+
+    if (sections.length > 0 && (!activeDirectorySection || !sections.includes(activeDirectorySection))) {
+        activeDirectorySection = sections[0];
+    }
+
+    // 2. Kunin ang Students mula sa Supabase
+    const { data: studData, error: studError } = await supabaseClient
         .from('students')
         .select('*')
         .eq('user_id', user.id);
 
-    if (error) {
+    if (studError) {
         showToast("Error loading students", "error");
-        console.error(error);
+        console.error(studError);
     } else {
-        students = data || [];
-        populateDropdowns();
-        renderDashboard();
-        renderDirectory();
-        loadAttendanceSheet();
-        populateHistoryStudentSelect();
+        students = studData || [];
     }
+
+    // 3. Kunin ang Attendance Records mula sa Supabase
+    const { data: attData, error: attError } = await supabaseClient
+        .from('attendance')
+        .select('*')
+        .eq('user_id', user.id);
+
+    if (!attError && attData) {
+        attendanceRecords = {};
+        attData.forEach(rec => {
+            if (!attendanceRecords[rec.date]) {
+                attendanceRecords[rec.date] = {};
+            }
+            attendanceRecords[rec.date][rec.student_id] = rec.status;
+        });
+    }
+
+    populateDropdowns();
+    renderDashboard();
+    renderDirectory();
+    loadAttendanceSheet();
+    populateHistoryStudentSelect();
 }
 
 function showToast(message, type = 'success') {
@@ -322,13 +350,8 @@ function loadAttendanceSheet() {
 }
 
 async function setAttendanceStatus(date, studentId, status) {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
-
     if(!attendanceRecords[date]) attendanceRecords[date] = {};
     attendanceRecords[date][studentId] = status;
-    
-    localStorage.setItem(`schola_attendance_${user.id}`, JSON.stringify(attendanceRecords));
     loadAttendanceSheet();
 }
 
@@ -350,11 +373,37 @@ function markAllAttendance(status) {
     showToast(`Marked all as ${status}!`);
 }
 
+// I-save ang attendance records diretso sa Supabase
 async function saveAttendance() {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) return;
-    localStorage.setItem(`schola_attendance_${user.id}`, JSON.stringify(attendanceRecords));
-    showToast("Attendance saved successfully!");
+
+    const dateEl = document.getElementById('att-date');
+    if(!dateEl) return;
+    const selectedDate = dateEl.value;
+
+    const currentDaySheet = attendanceRecords[selectedDate] || {};
+    const upsertData = Object.keys(currentDaySheet).map(studentId => ({
+        user_id: user.id,
+        student_id: studentId,
+        date: selectedDate,
+        status: currentDaySheet[studentId]
+    }));
+
+    if(upsertData.length === 0) {
+        showToast("No attendance data to save.", "error");
+        return;
+    }
+
+    const { error } = await supabaseClient
+        .from('attendance')
+        .upsert(upsertData, { onConflict: 'user_id,student_id,date' });
+
+    if (error) {
+        showToast("Failed to save attendance: " + error.message, "error");
+    } else {
+        showToast("Attendance saved successfully to cloud!");
+    }
 }
 
 function toggleHistoryMode() {
@@ -398,6 +447,7 @@ function openAddSectionModal() {
     }
 }
 
+// Magdagdag ng Section diretso sa Supabase
 async function handleSectionSubmit(event) {
     event.preventDefault();
     const { data: { user } } = await supabaseClient.auth.getUser();
@@ -412,35 +462,37 @@ async function handleSectionSubmit(event) {
         return;
     }
 
-    sections.push(newSection);
-    localStorage.setItem(`schola_sections_${user.id}`, JSON.stringify(sections));
+    const { error } = await supabaseClient
+        .from('sections')
+        .insert([{ name: newSection, user_id: user.id }]);
 
-    if (!activeDirectorySection) activeDirectorySection = newSection;
-
-    populateDropdowns();
-    renderDashboard();
-    renderDirectory();
-    closeModal('modal-section');
-    showToast("Section successfully added!");
+    if (error) {
+        showToast(error.message, "error");
+    } else {
+        closeModal('modal-section');
+        showToast("Section successfully added!");
+        await fetchStudentsFromSupabase();
+    }
 }
 
+// Mag-delete ng Section sa Supabase
 async function deleteSection(sectionName) {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) return;
 
     if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
-        sections = sections.filter(s => s !== sectionName);
-        localStorage.setItem(`schola_sections_${user.id}`, JSON.stringify(sections));
+        const { error } = await supabaseClient
+            .from('sections')
+            .delete()
+            .eq('name', sectionName)
+            .eq('user_id', user.id);
 
-        if (activeDirectorySection === sectionName) {
-            activeDirectorySection = sections[0] || "";
+        if (error) {
+            showToast(error.message, "error");
+        } else {
+            showToast("Section deleted successfully!");
+            await fetchStudentsFromSupabase();
         }
-
-        populateDropdowns();
-        renderDashboard();
-        renderDirectory();
-        loadAttendanceSheet();
-        showToast("Section deleted successfully!");
     }
 }
 
