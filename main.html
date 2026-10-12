@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schola - Student & Attendance Management</title>
+    <title>Scholog - Student & Attendance Management</title>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Supabase JS SDK -->
@@ -19,7 +19,7 @@
             <div class="brand">
                 <div class="brand-logo">S</div>
                 <div>
-                    <h1>Schola</h1>
+                    <h1>Scholog</h1>
                     <span>Attendance & Directory</span>
                 </div>
             </div>
@@ -27,9 +27,8 @@
             <!-- Nav Tabs (Desktop) -->
             <nav class="nav-tabs desktop-nav">
                 <button onclick="switchTab('dashboard')" id="nav-dashboard" class="tab-btn active">Dashboard</button>
-                <button onclick="switchTab('directory')" id="nav-directory" class="tab-btn">Directory</button>
+                <button onclick="switchTab('directory')" id="nav-directory" class="tab-btn">Class List</button>
                 <button onclick="switchTab('attendance')" id="nav-attendance" class="tab-btn">Take Attendance</button>
-                <button onclick="switchTab('history')" id="nav-history" class="tab-btn">History & Reports</button>
             </nav>
 
             <div class="nav-actions">
@@ -55,13 +54,9 @@
         <!-- Mobile Dropdown Hamburger Menu -->
         <div id="mobileMenu" class="mobile-dropdown-menu hidden">
             <button onclick="switchTab('dashboard'); toggleMobileMenu()" id="mob-nav-dashboard" class="mob-menu-item active">Dashboard</button>
-            <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">Directory</button>
+            <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">Class List</button>
             <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">Take Attendance</button>
-            <button onclick="switchTab('history'); toggleMobileMenu()" id="mob-nav-history" class="mob-menu-item">History & Reports</button>
             <div class="mob-menu-divider"></div>
-            <button onclick="openAddSectionModal(); toggleMobileMenu()" class="mob-menu-item">
-                <i data-lucide="folder-plus" style="width:14px; height:14px;"></i> Add Section
-            </button>
             <button onclick="handleLogout()" class="mob-menu-item" style="color: var(--rose-text);">
                 <i data-lucide="log-out" style="width:14px; height:14px;"></i> Logout
             </button>
@@ -118,11 +113,11 @@
             </div>
         </section>
 
-        <!-- ================= STUDENT DIRECTORY VIEW ================= -->
+        <!-- ================= CLASS LIST VIEW ================= -->
         <section id="view-directory" class="view-section hidden">
             <div class="section-header-flex">
                 <div>
-                    <h2>Student Directory</h2>
+                    <h2>Class List</h2>
                     <p>Manage student records organized by section</p>
                 </div>
                 <div class="search-action-group">
@@ -161,17 +156,21 @@
                 <div class="filter-flex">
                     <div class="filter-inputs">
                         <div class="input-group">
-                            <label>Select Date</label>
+                            <label for="att-date"><i data-lucide="calendar" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Date</label>
                             <input type="date" id="att-date" onchange="loadAttendanceSheet()" class="form-control">
                         </div>
                         <div class="input-group">
-                            <label>Select Section</label>
+                            <label for="att-section"><i data-lucide="users" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Section</label>
                             <select id="att-section" onchange="loadAttendanceSheet()" class="form-control"></select>
                         </div>
                     </div>
                     <div class="filter-actions">
-                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle" style="flex: 1;">All Present</button>
-                        <button onclick="saveAttendance()" class="btn btn-primary" style="flex: 1;">Save</button>
+                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle" style="flex: 1;">
+                            <i data-lucide="check-circle-2"></i> All Present
+                        </button>
+                        <button onclick="saveAttendance()" class="btn btn-primary" style="flex: 1;">
+                            <i data-lucide="save"></i> Save Attendance
+                        </button>
                     </div>
                 </div>
             </div>
@@ -179,8 +178,8 @@
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2>Attendance Sheet</h2>
-                        <p id="att-sheet-subtitle">Mark student status for the selected date</p>
+                        <h2>Attendance Sheet Table</h2>
+                        <p id="att-sheet-subtitle" style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px;">Mark or review student status for the selected date</p>
                     </div>
                     <div class="legend-group">
                         <span><span class="dot dot-emerald"></span>Present</span>
@@ -193,40 +192,17 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Student</th>
+                                <th style="width: 50px;">#</th>
+                                <th>Student Name</th>
                                 <th>Student ID</th>
-                                <th class="text-center">Status</th>
+                                <th>Date</th>
+                                <th class="text-center">Status Selection</th>
                             </tr>
                         </thead>
                         <tbody id="att-table-body"></tbody>
                     </table>
                 </div>
             </div>
-        </section>
-
-        <!-- ================= HISTORY VIEW ================= -->
-        <section id="view-history" class="view-section hidden">
-            <div class="card filter-card">
-                <div class="filter-flex">
-                    <div>
-                        <h2>Attendance History & Reports</h2>
-                        <p>View logs by date or individual student performance</p>
-                    </div>
-                    <div class="history-controls">
-                        <select id="history-filter-type" onchange="toggleHistoryMode()" class="form-control">
-                            <option value="date">Filter by Date</option>
-                            <option value="student">Filter by Student</option>
-                        </select>
-                        <div id="history-input-date-wrapper" style="width: 100%;">
-                            <input type="date" id="history-date" onchange="renderHistory()" class="form-control">
-                        </div>
-                        <div id="history-input-student-wrapper" class="hidden" style="width: 100%;">
-                            <select id="history-student-select" onchange="renderHistory()" class="form-control"></select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div id="history-results" class="card"></div>
         </section>
     </main>
 
