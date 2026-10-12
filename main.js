@@ -1,11 +1,6 @@
-// Auth Guard para masigurong naka-login ang user
-async function checkAuthGuard() {
-    const { data: { user }, error } = await supabaseClient.auth.getUser();
-    if (error || !user) {
-        window.location.href = 'index.html';
-    }
-}
-checkAuthGuard();
+// ==========================================
+// SCHOLA - MAIN APPLICATION LOGIC
+// ==========================================
 
 // Supabase Configuration
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
@@ -13,21 +8,41 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Application State
 let sections = [];
 let students = []; 
 let attendanceRecords = {};
 let activeDirectorySection = "";
 let studentToDeleteId = null;
 
+// Auth Guard on Page Load
+async function checkAuthGuard() {
+    try {
+        const { data: { user }, error } = await supabaseClient.auth.getUser();
+        if (error || !user) {
+            console.warn("Authentication check failed or user not logged in. Redirecting to login.");
+            window.location.href = 'index.html';
+        }
+    } catch (err) {
+        console.error("Critical error in checkAuthGuard:", err);
+        window.location.href = 'index.html';
+    }
+}
+
+// Initializer Lifecycle
 document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuthGuard();
+
     const todayStr = new Date().toISOString().split('T')[0];
     const attDateEl = document.getElementById('att-date');
     const histDateEl = document.getElementById('history-date');
-    if(attDateEl) attDateEl.value = todayStr;
-    if(histDateEl) histDateEl.value = todayStr;
+    if (attDateEl) attDateEl.value = todayStr;
+    if (histDateEl) histDateEl.value = todayStr;
 
     await fetchStudentsFromSupabase();
-    lucide.createIcons();
+    if (window.lucide) {
+        lucide.createIcons();
+    }
 });
 
 // Toggle Mobile Hamburger Menu
@@ -38,69 +53,91 @@ function toggleMobileMenu() {
     }
 }
 
-// Fetch lahat ng data mula sa Supabase Cloud Database
+// Fetch All Data from Supabase Cloud Database with Robust Error Handling
 async function fetchStudentsFromSupabase() {
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) return;
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+            console.error("User session not found during data fetch:", userError);
+            return;
+        }
 
-    // 1. Kunin ang Sections mula sa Supabase
-    const { data: secData, error: secError } = await supabaseClient
-        .from('sections')
-        .select('name')
-        .eq('user_id', user.id);
+        // 1. Fetch Sections
+        const { data: secData, error: secError } = await supabaseClient
+            .from('sections')
+            .select('name')
+            .eq('user_id', user.id);
 
-    if (!secError && secData) {
-        sections = secData.map(s => s.name);
-    }
+        if (secError) {
+            console.error("Error fetching sections:", secError);
+            showToast("Error loading sections", "error");
+            sections = [];
+        } else {
+            sections = secData ? secData.map(s => s.name) : [];
+        }
 
-    if (sections.length > 0 && (!activeDirectorySection || !sections.includes(activeDirectorySection))) {
-        activeDirectorySection = sections[0];
-    }
+        if (sections.length > 0 && (!activeDirectorySection || !sections.includes(activeDirectorySection))) {
+            activeDirectorySection = sections[0];
+        }
 
-    // 2. Kunin ang Students mula sa Supabase
-    const { data: studData, error: studError } = await supabaseClient
-        .from('students')
-        .select('*')
-        .eq('user_id', user.id);
+        // 2. Fetch Students
+        const { data: studData, error: studError } = await supabaseClient
+            .from('students')
+            .select('*')
+            .eq('user_id', user.id);
 
-    if (studError) {
-        showToast("Error loading students", "error");
-        console.error(studError);
-    } else {
-        students = studData || [];
-    }
+        if (studError) {
+            console.error("Error fetching students:", studError);
+            showToast("Error loading students", "error");
+            students = [];
+        } else {
+            students = studData || [];
+        }
 
-    // 3. Kunin ang Attendance Records mula sa Supabase
-    const { data: attData, error: attError } = await supabaseClient
-        .from('attendance')
-        .select('*')
-        .eq('user_id', user.id);
+        // 3. Fetch Attendance Records
+        const { data: attData, error: attError } = await supabaseClient
+            .from('attendance')
+            .select('*')
+            .eq('user_id', user.id);
 
-    if (!attError && attData) {
-        attendanceRecords = {};
-        attData.forEach(rec => {
-            if (!attendanceRecords[rec.date]) {
-                attendanceRecords[rec.date] = {};
+        if (attError) {
+            console.error("Error fetching attendance records:", attError);
+            showToast("Error loading attendance records", "error");
+            attendanceRecords = {};
+        } else {
+            attendanceRecords = {};
+            if (attData) {
+                attData.forEach(rec => {
+                    if (!attendanceRecords[rec.date]) {
+                        attendanceRecords[rec.date] = {};
+                    }
+                    attendanceRecords[rec.date][rec.student_id] = rec.status;
+                });
             }
-            attendanceRecords[rec.date][rec.student_id] = rec.status;
-        });
-    }
+        }
 
-    populateDropdowns();
-    renderDashboard();
-    renderDirectory();
-    loadAttendanceSheet();
-    populateHistoryStudentSelect();
+        // Render UI Components with Fresh State
+        populateDropdowns();
+        renderDashboard();
+        renderDirectory();
+        loadAttendanceSheet();
+        populateHistoryStudentSelect();
+
+    } catch (err) {
+        console.error("Unexpected error in fetchStudentsFromSupabase:", err);
+        showToast("Failed to synchronize data from cloud.", "error");
+    }
 }
 
+// Toast Notification System
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
-    if(!container) return;
+    if (!container) return;
     const toast = document.createElement('div');
     toast.className = `toast ${type === 'success' ? 'toast-success' : 'toast-error'}`;
     toast.innerHTML = `<i data-lucide="${type === 'success' ? 'check-circle' : 'alert-circle'}"></i><span>${message}</span>`;
     container.appendChild(toast);
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 
     setTimeout(() => { toast.classList.add('show'); }, 10);
     setTimeout(() => {
@@ -109,52 +146,55 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
+// Tab Switching Navigation
 function switchTab(tabName) {
     ['dashboard', 'directory', 'attendance', 'history'].forEach(t => {
         const viewEl = document.getElementById(`view-${t}`);
-        if(viewEl) viewEl.classList.add('hidden');
+        if (viewEl) viewEl.classList.add('hidden');
         const btn = document.getElementById(`nav-${t}`);
-        if(btn) btn.classList.remove('active');
+        if (btn) btn.classList.remove('active');
         const mobBtn = document.getElementById(`mob-nav-${t}`);
-        if(mobBtn) mobBtn.classList.remove('active');
+        if (mobBtn) mobBtn.classList.remove('active');
     });
 
     const activeView = document.getElementById(`view-${tabName}`);
-    if(activeView) activeView.classList.remove('hidden');
+    if (activeView) activeView.classList.remove('hidden');
     const activeBtn = document.getElementById(`nav-${tabName}`);
-    if(activeBtn) activeBtn.classList.add('active');
+    if (activeBtn) activeBtn.classList.add('active');
     const activeMob = document.getElementById(`mob-nav-${tabName}`);
-    if(activeMob) activeMob.classList.add('active');
+    if (activeMob) activeMob.classList.add('active');
 
-    if(tabName === 'dashboard') renderDashboard();
-    if(tabName === 'directory') renderDirectory();
-    if(tabName === 'attendance') loadAttendanceSheet();
-    if(tabName === 'history') renderHistory();
+    if (tabName === 'dashboard') renderDashboard();
+    if (tabName === 'directory') renderDirectory();
+    if (tabName === 'attendance') loadAttendanceSheet();
+    if (tabName === 'history') renderHistory();
 }
 
+// Populate Section Select Dropdowns
 function populateDropdowns() {
     const attSelect = document.getElementById('att-section');
     const studSelect = document.getElementById('stud-section');
     
-    if(attSelect) attSelect.innerHTML = '';
-    if(studSelect) studSelect.innerHTML = '';
+    if (attSelect) attSelect.innerHTML = '';
+    if (studSelect) studSelect.innerHTML = '';
 
     if (sections.length === 0) {
-        if(attSelect) attSelect.innerHTML = `<option value="">No sections available</option>`;
-        if(studSelect) studSelect.innerHTML = `<option value="">No sections available</option>`;
+        if (attSelect) attSelect.innerHTML = `<option value="">No sections available</option>`;
+        if (studSelect) studSelect.innerHTML = `<option value="">No sections available</option>`;
         return;
     }
 
     sections.forEach(sec => {
-        if(attSelect) attSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
-        if(studSelect) studSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
+        if (attSelect) attSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
+        if (studSelect) studSelect.innerHTML += `<option value="${sec}">${sec}</option>`;
     });
 }
 
+// Render Dashboard View & Metrics
 function renderDashboard() {
     const todayStr = new Date().toISOString().split('T')[0];
     const dateLabel = document.getElementById('dash-date-label');
-    if(dateLabel) dateLabel.innerText = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (dateLabel) dateLabel.innerText = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
     const totalStudents = students.length;
     const todayAtt = attendanceRecords[todayStr] || {};
@@ -164,9 +204,9 @@ function renderDashboard() {
 
     students.forEach(s => {
         const status = todayAtt[s.id];
-        if(status === 'Present' || status === 'Late' || status === 'Excused') {
+        if (status === 'Present' || status === 'Late' || status === 'Excused') {
             presentCount++;
-        } else if(status === 'Absent') {
+        } else if (status === 'Absent') {
             absentCount++;
         }
     });
@@ -176,15 +216,15 @@ function renderDashboard() {
     const statAbsent = document.getElementById('stat-absent');
     const statRate = document.getElementById('stat-rate');
 
-    if(statTotal) statTotal.innerText = totalStudents;
-    if(statPresent) statPresent.innerText = presentCount;
-    if(statAbsent) statAbsent.innerText = absentCount;
+    if (statTotal) statTotal.innerText = totalStudents;
+    if (statPresent) statPresent.innerText = presentCount;
+    if (statAbsent) statAbsent.innerText = absentCount;
     
     let overallPct = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
-    if(statRate) statRate.innerText = overallPct + '%';
+    if (statRate) statRate.innerText = overallPct + '%';
 
     const breakdownContainer = document.getElementById('section-breakdown-container');
-    if(!breakdownContainer) return;
+    if (!breakdownContainer) return;
     breakdownContainer.innerHTML = '';
 
     if (sections.length === 0) {
@@ -199,13 +239,13 @@ function renderDashboard() {
         let secPresent = 0;
         secStudents.forEach(s => {
             const status = todayAtt[s.id];
-            if(status === 'Present' || status === 'Late' || status === 'Excused') secPresent++;
+            if (status === 'Present' || status === 'Late' || status === 'Excused') secPresent++;
         });
 
         let secRate = secTotal > 0 ? Math.round((secPresent / secTotal) * 100) : 0;
         let badgeClass = 'badge-emerald';
-        if(secRate < 75) badgeClass = 'badge-rose';
-        else if(secRate < 90) badgeClass = 'badge-amber';
+        if (secRate < 75) badgeClass = 'badge-rose';
+        else if (secRate < 90) badgeClass = 'badge-amber';
 
         breakdownContainer.innerHTML += `
             <div class="breakdown-item">
@@ -222,9 +262,10 @@ function renderDashboard() {
             </div>
         `;
     });
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
+// Render Student Directory View
 function renderDirectory() {
     const tabsContainer = document.getElementById('directory-section-tabs');
     const bannerContainer = document.getElementById('directory-section-banner');
@@ -232,7 +273,7 @@ function renderDirectory() {
     const searchInput = document.getElementById('directory-search');
     const searchQuery = searchInput ? searchInput.value.toLowerCase() : '';
 
-    if(!tabsContainer || !bannerContainer || !tbody) return;
+    if (!tabsContainer || !bannerContainer || !tbody) return;
 
     tabsContainer.innerHTML = '';
     
@@ -244,7 +285,7 @@ function renderDirectory() {
         return;
     }
 
-    if(!sections.includes(activeDirectorySection) && sections.length > 0) {
+    if (!sections.includes(activeDirectorySection) && sections.length > 0) {
         activeDirectorySection = sections[0];
     }
 
@@ -275,7 +316,7 @@ function renderDirectory() {
     `;
 
     tbody.innerHTML = '';
-    if(sectionStudents.length === 0) {
+    if (sectionStudents.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No students found in this section.</td></tr>`;
         return;
     }
@@ -300,35 +341,36 @@ function renderDirectory() {
             </tr>
         `;
     });
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
+// Load Attendance Sheet View
 function loadAttendanceSheet() {
     const dateEl = document.getElementById('att-date');
     const sectionEl = document.getElementById('att-section');
     const tbody = document.getElementById('att-table-body');
     const subtitle = document.getElementById('att-sheet-subtitle');
 
-    if(!dateEl || !sectionEl || !tbody) return;
+    if (!dateEl || !sectionEl || !tbody) return;
     const date = dateEl.value;
     const section = sectionEl.value;
 
     if (!section || sections.length === 0) {
-        if(subtitle) subtitle.innerText = `No sections available`;
+        if (subtitle) subtitle.innerText = `No sections available`;
         tbody.innerHTML = `<tr><td colspan="3" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">Please create a section first.</td></tr>`;
         return;
     }
 
-    if(subtitle) subtitle.innerText = `Marking for ${section} on ${date}`;
+    if (subtitle) subtitle.innerText = `Marking for ${section} on ${date}`;
     tbody.innerHTML = '';
 
     const secStudents = students.filter(s => s.section === section);
-    if(secStudents.length === 0) {
+    if (secStudents.length === 0) {
         tbody.innerHTML = `<tr><td colspan="3" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No students enrolled in this section.</td></tr>`;
         return;
     }
 
-    if(!attendanceRecords[date]) attendanceRecords[date] = {};
+    if (!attendanceRecords[date]) attendanceRecords[date] = {};
 
     secStudents.forEach(s => {
         const currentStatus = attendanceRecords[date][s.id] || 'Present';
@@ -349,8 +391,8 @@ function loadAttendanceSheet() {
     });
 }
 
-async function setAttendanceStatus(date, studentId, status) {
-    if(!attendanceRecords[date]) attendanceRecords[date] = {};
+function setAttendanceStatus(date, studentId, status) {
+    if (!attendanceRecords[date]) attendanceRecords[date] = {};
     attendanceRecords[date][studentId] = status;
     loadAttendanceSheet();
 }
@@ -358,13 +400,13 @@ async function setAttendanceStatus(date, studentId, status) {
 function markAllAttendance(status) {
     const dateEl = document.getElementById('att-date');
     const sectionEl = document.getElementById('att-section');
-    if(!dateEl || !sectionEl) return;
+    if (!dateEl || !sectionEl) return;
     
     const date = dateEl.value;
     const section = sectionEl.value;
     const secStudents = students.filter(s => s.section === section);
 
-    if(!attendanceRecords[date]) attendanceRecords[date] = {};
+    if (!attendanceRecords[date]) attendanceRecords[date] = {};
     secStudents.forEach(s => {
         attendanceRecords[date][s.id] = status;
     });
@@ -373,42 +415,52 @@ function markAllAttendance(status) {
     showToast(`Marked all as ${status}!`);
 }
 
-// I-save ang attendance records diretso sa Supabase
+// Save Attendance Records to Supabase Cloud with Upsert
 async function saveAttendance() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+            showToast("Authentication required to save attendance.", "error");
+            return;
+        }
 
-    const dateEl = document.getElementById('att-date');
-    if(!dateEl) return;
-    const selectedDate = dateEl.value;
+        const dateEl = document.getElementById('att-date');
+        if (!dateEl) return;
+        const selectedDate = dateEl.value;
 
-    const currentDaySheet = attendanceRecords[selectedDate] || {};
-    const upsertData = Object.keys(currentDaySheet).map(studentId => ({
-        user_id: user.id,
-        student_id: studentId,
-        date: selectedDate,
-        status: currentDaySheet[studentId]
-    }));
+        const currentDaySheet = attendanceRecords[selectedDate] || {};
+        const upsertData = Object.keys(currentDaySheet).map(studentId => ({
+            user_id: user.id,
+            student_id: studentId,
+            date: selectedDate,
+            status: currentDaySheet[studentId]
+        }));
 
-    if(upsertData.length === 0) {
-        showToast("No attendance data to save.", "error");
-        return;
-    }
+        if (upsertData.length === 0) {
+            showToast("No attendance data to save.", "error");
+            return;
+        }
 
-    const { error } = await supabaseClient
-        .from('attendance')
-        .upsert(upsertData, { onConflict: 'user_id,student_id,date' });
+        const { error } = await supabaseClient
+            .from('attendance')
+            .upsert(upsertData, { onConflict: 'user_id,student_id,date' });
 
-    if (error) {
-        showToast("Failed to save attendance: " + error.message, "error");
-    } else {
-        showToast("Attendance saved successfully to cloud!");
+        if (error) {
+            console.error("Supabase attendance upsert error:", error);
+            showToast("Failed to save attendance: " + error.message, "error");
+        } else {
+            showToast("Attendance saved successfully to cloud!");
+        }
+    } catch (err) {
+        console.error("Unexpected error in saveAttendance:", err);
+        showToast("An unexpected error occurred while saving attendance.", "error");
     }
 }
 
+// History & Reports View Helpers
 function toggleHistoryMode() {
     const mode = document.getElementById('history-filter-type').value;
-    if(mode === 'date') {
+    if (mode === 'date') {
         document.getElementById('history-input-date-wrapper').classList.remove('hidden');
         document.getElementById('history-input-student-wrapper').classList.add('hidden');
     } else {
@@ -421,9 +473,9 @@ function toggleHistoryMode() {
 
 function populateHistoryStudentSelect() {
     const select = document.getElementById('history-student-select');
-    if(!select) return;
+    if (!select) return;
     select.innerHTML = '';
-    if(students.length === 0) {
+    if (students.length === 0) {
         select.innerHTML = `<option value="">No students available</option>`;
         return;
     }
@@ -434,65 +486,79 @@ function populateHistoryStudentSelect() {
 
 function renderHistory() {
     const results = document.getElementById('history-results');
-    if(!results) return;
+    if (!results) return;
     results.innerHTML = `<div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px;">History report view active.</div>`;
 }
 
+// Modal & Section Handlers
 function openAddSectionModal() {
     const modal = document.getElementById('modal-section');
     if (modal) {
         modal.classList.remove('hidden');
         const input = document.getElementById('new-section-name');
-        if(input) { input.value = ''; input.focus(); }
+        if (input) { input.value = ''; input.focus(); }
     }
 }
 
-// Magdagdag ng Section diretso sa Supabase
 async function handleSectionSubmit(event) {
     event.preventDefault();
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+            showToast("Authentication required.", "error");
+            return;
+        }
 
-    const sectionInput = document.getElementById('new-section-name');
-    const newSection = sectionInput.value.trim();
-    if (!newSection) return;
+        const sectionInput = document.getElementById('new-section-name');
+        const newSection = sectionInput.value.trim();
+        if (!newSection) return;
 
-    if (sections.includes(newSection)) {
-        showToast("Section already exists!", "error");
-        return;
-    }
+        if (sections.includes(newSection)) {
+            showToast("Section already exists!", "error");
+            return;
+        }
 
-    const { error } = await supabaseClient
-        .from('sections')
-        .insert([{ name: newSection, user_id: user.id }]);
+        const { error } = await supabaseClient
+            .from('sections')
+            .insert([{ name: newSection, user_id: user.id }]);
 
-    if (error) {
-        showToast(error.message, "error");
-    } else {
-        closeModal('modal-section');
-        showToast("Section successfully added!");
-        await fetchStudentsFromSupabase();
+        if (error) {
+            console.error("Error inserting section:", error);
+            showToast(error.message, "error");
+        } else {
+            closeModal('modal-section');
+            showToast("Section successfully added!");
+            await fetchStudentsFromSupabase();
+        }
+    } catch (err) {
+        console.error("Unexpected error in handleSectionSubmit:", err);
+        showToast("Failed to add section.", "error");
     }
 }
 
-// Mag-delete ng Section sa Supabase
 async function deleteSection(sectionName) {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) return;
 
-    if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
-        const { error } = await supabaseClient
-            .from('sections')
-            .delete()
-            .eq('name', sectionName)
-            .eq('user_id', user.id);
+        if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
+            const { error } = await supabaseClient
+                .from('sections')
+                .delete()
+                .eq('name', sectionName)
+                .eq('user_id', user.id);
 
-        if (error) {
-            showToast(error.message, "error");
-        } else {
-            showToast("Section deleted successfully!");
-            await fetchStudentsFromSupabase();
+            if (error) {
+                console.error("Error deleting section:", error);
+                showToast(error.message, "error");
+            } else {
+                showToast("Section deleted successfully!");
+                await fetchStudentsFromSupabase();
+            }
         }
+    } catch (err) {
+        console.error("Unexpected error in deleteSection:", err);
+        showToast("Failed to delete section.", "error");
     }
 }
 
@@ -515,32 +581,39 @@ function openAddStudentModalForSection(section) {
 }
 
 function closeModal(modalId) {
-    document.getElementById(modalId).classList.add('hidden');
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.add('hidden');
 }
 
 async function handleStudentSubmit(event) {
     event.preventDefault();
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-        showToast("You need to log in again.", "error");
-        return;
-    }
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) {
+            showToast("You need to log in again.", "error");
+            return;
+        }
 
-    const name = document.getElementById('stud-name').value.trim();
-    const id = document.getElementById('stud-id').value.trim();
-    const section = document.getElementById('stud-section').value;
-    const email = document.getElementById('stud-email').value.trim();
+        const name = document.getElementById('stud-name').value.trim();
+        const id = document.getElementById('stud-id').value.trim();
+        const section = document.getElementById('stud-section').value;
+        const email = document.getElementById('stud-email').value.trim();
 
-    const { error } = await supabaseClient
-        .from('students')
-        .insert([{ id, name, section, email, user_id: user.id }]);
+        const { error } = await supabaseClient
+            .from('students')
+            .insert([{ id, name, section, email, user_id: user.id }]);
 
-    if (error) {
-        showToast(error.message, "error");
-    } else {
-        showToast("Student successfully added to Supabase!");
-        closeModal('modal-student');
-        await fetchStudentsFromSupabase();
+        if (error) {
+            console.error("Error inserting student:", error);
+            showToast(error.message, "error");
+        } else {
+            showToast("Student successfully added to Supabase!");
+            closeModal('modal-student');
+            await fetchStudentsFromSupabase();
+        }
+    } catch (err) {
+        console.error("Unexpected error in handleStudentSubmit:", err);
+        showToast("Failed to add student.", "error");
     }
 }
 
@@ -558,7 +631,7 @@ function deleteStudent(id) {
     }
 
     document.getElementById('modal-delete-student').classList.remove('hidden');
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 }
 
 async function confirmDeleteStudent() {
@@ -570,32 +643,48 @@ async function confirmDeleteStudent() {
         confirmBtn.innerText = "Deleting...";
     }
 
-    const { error } = await supabaseClient
-        .from('students')
-        .delete()
-        .eq('id', studentToDeleteId);
+    try {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+        if (userError || !user) return;
 
-    if (error) {
-        showToast(error.message, "error");
-    } else {
-        showToast("Student deleted successfully!");
-        closeModal('modal-delete-student');
-        await fetchStudentsFromSupabase();
-    }
+        const { error } = await supabaseClient
+            .from('students')
+            .delete()
+            .eq('id', studentToDeleteId)
+            .eq('user_id', user.id);
 
-    if (confirmBtn) {
-        confirmBtn.disabled = false;
-        confirmBtn.innerText = "Delete";
+        if (error) {
+            console.error("Error deleting student:", error);
+            showToast(error.message, "error");
+        } else {
+            showToast("Student deleted successfully!");
+            closeModal('modal-delete-student');
+            await fetchStudentsFromSupabase();
+        }
+    } catch (err) {
+        console.error("Unexpected error in confirmDeleteStudent:", err);
+        showToast("Failed to delete student.", "error");
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerText = "Delete";
+        }
+        studentToDeleteId = null;
     }
-    studentToDeleteId = null;
 }
 
 async function handleLogout() {
-    const { error } = await supabaseClient.auth.signOut();
-    if (error) {
-        showToast("Error during logout", "error");
-    } else {
-        showToast("Logged out successfully! Redirecting...", "success");
-        setTimeout(() => { window.location.href = 'index.html'; }, 1000);
+    try {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) {
+            console.error("Error during logout:", error);
+            showToast("Error during logout", "error");
+        } else {
+            showToast("Logged out successfully! Redirecting...", "success");
+            setTimeout(() => { window.location.href = 'index.html'; }, 1000);
+        }
+    } catch (err) {
+        console.error("Unexpected error in handleLogout:", err);
+        window.location.href = 'index.html';
     }
 }
