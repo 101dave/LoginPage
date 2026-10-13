@@ -83,18 +83,11 @@ body {
     gap: 12px;
 }
 
-.brand-logo {
-    width: 38px;
+.brand-logo-img {
     height: 38px;
-    background: linear-gradient(135deg, #0f172a, #334155);
-    color: white;
+    width: auto;
+    object-fit: contain;
     border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 18px;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
 }
 
 .brand h1 {
@@ -570,6 +563,136 @@ body {
 .grid-2 { display: grid; grid-template-columns: 1fr; gap: 14px; }
 @media(min-width: 480px) { .grid-2 { grid-template-columns: repeat(2, 1fr); } }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border-light); margin-top: 4px; }
+
+/* ==========================================
+   ATTENDANCE HISTORY CALENDAR STYLES (FIXED SCROLL)
+   ========================================== */
+#modal-attendance-history .modal-content {
+    max-height: 85vh;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.history-month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--border-light);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.calendar-container {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    max-height: 340px;
+}
+
+.calendar-days-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    background-color: var(--border-light);
+    border-bottom: 1px solid var(--border-color);
+    text-align: center;
+    font-weight: 700;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 8px 0;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    padding: 8px;
+    background-color: var(--bg-main);
+    overflow-y: auto;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+}
+
+.calendar-day-cell {
+    aspect-ratio: 1;
+    border-radius: 6px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    position: relative;
+    min-height: 48px;
+}
+
+.calendar-day-cell.empty {
+    background: transparent;
+    border: none;
+    min-height: 0;
+}
+
+.day-number {
+    font-size: 11px;
+    color: var(--text-muted);
+    align-self: flex-start;
+}
+
+.day-status-indicator {
+    width: 100%;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 0;
+    border-radius: 4px;
+    margin-top: 2px;
+}
+
+/* Calendar Status Colors */
+.status-cell-Present { background-color: var(--emerald-bg); color: var(--emerald-text); border: 1px solid var(--emerald-border); }
+.status-cell-Late { background-color: var(--amber-bg); color: var(--amber-text); border: 1px solid var(--amber-border); }
+.status-cell-Absent { background-color: var(--rose-bg); color: var(--rose-text); border: 1px solid var(--rose-border); }
+.status-cell-Excused { background-color: var(--blue-bg); color: var(--blue-text); border: 1px solid var(--blue-border); }
+
+/* History Summary Grid */
+.history-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.history-stat-box {
+    background: var(--border-light);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.history-stat-box .val {
+    font-weight: 800;
+    font-size: 16px;
+}
+
+.history-stat-box .lbl {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+}
 
 /* Toast Notifications */
 .toast-container { position: fixed; bottom: 20px; right: 20px; left: 20px; z-index: 60; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }

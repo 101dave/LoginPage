@@ -67,18 +67,11 @@ body {
     margin-bottom: 1rem;
 }
 
-.brand-logo {
-    width: 48px;
+.brand-logo-img {
     height: 48px;
-    background: linear-gradient(135deg, #0f172a, #334155);
-    color: white;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 22px;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+    width: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
 }
 
 .card-header h2 {

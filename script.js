@@ -41,17 +41,14 @@ async function handleLogin(event) {
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
 
-    // Sa halip na mag-declare ng bagong const, direktang gamitin ang window.supabase
-const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signInWithPassword({
-    email,
-    password,
-});
+    const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signInWithPassword({
+        email,
+        password,
+    });
 
     if (error) {
-        // Kapag mali ang password o email, ipapakita ang error message rito
         showAlert('Incorrect email or password. Please try again.', 'error');
     } else {
-        // Kapag tama ang password, magre-redirect sa iyong external website
         showAlert('Login successful! Redirecting...', 'success');
         setTimeout(() => {
             window.location.href = 'main.html';
@@ -67,25 +64,22 @@ async function handleSignup(event) {
     const email = document.getElementById('signupEmail').value;
     const password = document.getElementById('signupPassword').value;
 
-    // Disable button and show loading state
     submitBtn.disabled = true;
     const originalText = submitBtn.textContent;
     submitBtn.textContent = 'Creating Account...';
 
-    try{
-    const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signUp({
-        email,
-        password,
-    });
+    try {
+        const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signUp({
+            email,
+            password,
+        });
 
-    if (error) {
-        showAlert(error.message, 'error');
-    } else {
-        showAlert('Signup successful! Please check your email for verification.', 'success');
-    }
-    }
-   finally {
-        // Re-enable button
+        if (error) {
+            showAlert(error.message, 'error');
+        } else {
+            showAlert('Signup successful! Please check your email for verification.', 'success');
+        }
+    } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
     }

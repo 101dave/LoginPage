@@ -8,6 +8,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Supabase JS SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>    
+    <!-- jsPDF at jsPDF-AutoTable CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <!-- Pure CSS -->
     <link rel="stylesheet" href="main.css">
 </head>
@@ -17,10 +20,10 @@
     <header class="navbar">
         <div class="nav-container">
             <div class="brand">
-                <div class="brand-logo">S</div>
+                <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img">
                 <div>
                     <h1>Scholog</h1>
-                    <span>Attendance & Directory</span>
+                    <span>Attendance</span>
                 </div>
             </div>
 
@@ -169,7 +172,10 @@
                             <i data-lucide="check-circle-2"></i> All Present
                         </button>
                         <button onclick="saveAttendance()" class="btn btn-primary" style="flex: 1;">
-                            <i data-lucide="save"></i> Save Attendance
+                            <i data-lucide="save"></i> Save
+                        </button>
+                        <button onclick="exportAttendanceToPDF()" class="btn btn-secondary" style="flex: 1;">
+                            <i data-lucide="file-text"></i> Export PDF
                         </button>
                     </div>
                 </div>
@@ -260,6 +266,76 @@
         </div>
     </div>
 
+    <!-- Modal: Transfer Student Section -->
+    <div id="modal-transfer-student" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>Transfer Section</h3>
+                <button onclick="closeModal('modal-transfer-student')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <form onsubmit="handleTransferSubmit(event)" class="modal-form">
+                <input type="hidden" id="transfer-student-id">
+                <div class="input-group">
+                    <label>Student Name</label>
+                    <input type="text" id="transfer-student-name" class="form-control" readonly style="background-color: var(--border-light);">
+                </div>
+                <div class="input-group">
+                    <label>Select New Section</label>
+                    <select id="transfer-new-section" class="form-control" required></select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-transfer-student')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Move Student</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Attendance History Calendar -->
+    <div id="modal-attendance-history" class="modal-backdrop hidden">
+        <div class="modal-content" style="max-width: 580px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="history-student-name">Student Attendance History</h3>
+                    <p id="history-student-info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;"></p>
+                </div>
+                <button onclick="closeModal('modal-attendance-history')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+
+            <!-- Month Navigation Controls -->
+            <div class="history-month-nav">
+                <button onclick="changeHistoryMonth(-1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 32px;">
+                    <i data-lucide="chevron-left"></i>
+                </button>
+                <span id="history-month-label" style="font-weight: 700; font-size: 14px;">Month Year</span>
+                <button onclick="changeHistoryMonth(1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 32px;">
+                    <i data-lucide="chevron-right"></i>
+                </button>
+            </div>
+
+            <!-- Attendance Legend -->
+            <div class="legend-group" style="justify-content: center; gap: 12px; margin: 8px 0;">
+                <span><span class="dot dot-emerald"></span>Present</span>
+                <span><span class="dot dot-amber"></span>Late</span>
+                <span><span class="dot dot-rose"></span>Absent</span>
+                <span><span class="dot dot-blue"></span>Excused</span>
+                <span><span class="dot" style="background:#e2e8f0;"></span>No Record</span>
+            </div>
+
+            <!-- Calendar Grid -->
+            <div class="calendar-container">
+                <div class="calendar-days-header">
+                    <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                </div>
+                <div id="calendar-grid-body" class="calendar-grid"></div>
+            </div>
+
+            <!-- Summary Statistics for the Selected Month -->
+            <div id="history-stats-summary" class="history-stats"></div>
+        </div>
+    </div>
+
+    <!-- Modal: Delete Student -->
     <div id="modal-delete-student" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
@@ -274,6 +350,25 @@
             <div class="modal-footer">
                 <button type="button" onclick="closeModal('modal-delete-student')" class="btn btn-secondary">Cancel</button>
                 <button type="button" id="confirm-delete-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Delete Section -->
+    <div id="modal-delete-section" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3 style="color: var(--rose-text); display: flex; align-items: center; gap: 8px;">
+                    <i data-lucide="alert-triangle"></i> Delete Section
+                </h3>
+                <button onclick="closeModal('modal-delete-section')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+                Are you sure you want to delete section <strong id="delete-section-name" style="color: var(--text-main);"></strong>? This action cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-delete-section')" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="confirm-delete-section-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete Section</button>
             </div>
         </div>
     </div>

@@ -2,7 +2,6 @@
 // SCHOLOG - MAIN APPLICATION LOGIC
 // ==========================================
 
-// Supabase Configuration
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
@@ -14,6 +13,11 @@ let students = [];
 let attendanceRecords = {};
 let activeDirectorySection = "";
 let studentToDeleteId = null;
+let sectionToDelete = null;
+
+// State variables para sa Calendar History View
+let currentHistoryStudentId = null;
+let historyCurrentDate = new Date();
 
 // Auth Guard on Page Load
 async function checkAuthGuard() {
@@ -51,7 +55,7 @@ function toggleMobileMenu() {
     }
 }
 
-// Fetch All Data from Supabase Cloud Database with Robust Error Handling
+// Fetch All Data from Supabase Cloud Database
 async function fetchStudentsFromSupabase() {
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
@@ -115,7 +119,6 @@ async function fetchStudentsFromSupabase() {
             }
         }
 
-        // Render UI Components with Fresh State
         populateDropdowns();
         renderDashboard();
         renderDirectory();
@@ -333,6 +336,8 @@ function renderDirectory() {
                 <td style="color: var(--text-muted);">${s.email}</td>
                 <td><span class="badge badge-emerald">Active</span></td>
                 <td class="text-right">
+                    <button onclick="openStudentHistory('${s.id}')" style="background:none; border:none; color:var(--emerald-text); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">History</button>
+                    <button onclick="openTransferModal('${s.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">Move</button>
                     <button onclick="deleteStudent('${s.id}')" style="background:none; border:none; color:var(--rose-text); cursor:pointer; font-size:12px; font-weight:500;">Delete</button>
                 </td>
             </tr>
@@ -341,7 +346,91 @@ function renderDirectory() {
     if (window.lucide) lucide.createIcons();
 }
 
-// Load Attendance Sheet View (Table Layout with Date Support)
+// Open Student Attendance History Modal
+function openStudentHistory(studentId) {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    currentHistoryStudentId = studentId;
+    historyCurrentDate = new Date(); // Reset to current month
+
+    document.getElementById('history-student-name').innerText = student.name;
+    document.getElementById('history-student-info').innerText = `ID: ${student.id} | Section: ${student.section}`;
+
+    renderCalendarGrid();
+    document.getElementById('modal-attendance-history').classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+}
+
+// Change Month Navigation
+function changeHistoryMonth(offset) {
+    historyCurrentDate.setMonth(historyCurrentDate.getMonth() + offset);
+    renderCalendarGrid();
+}
+
+// Render Calendar Grid & Calculate Monthly Totals
+function renderCalendarGrid() {
+    if (!currentHistoryStudentId) return;
+
+    const year = historyCurrentDate.getFullYear();
+    const month = historyCurrentDate.getMonth();
+
+    // Set Month Header Label
+    const monthName = historyCurrentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    document.getElementById('history-month-label').innerText = monthName;
+
+    const gridBody = document.getElementById('calendar-grid-body');
+    gridBody.innerHTML = '';
+
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+
+    let counts = { Present: 0, Late: 0, Absent: 0, Excused: 0 };
+
+    // Fill Empty Leading Days
+    for (let i = 0; i < firstDayIndex; i++) {
+        gridBody.innerHTML += `<div class="calendar-day-cell empty"></div>`;
+    }
+
+    // Render Each Day of Month
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+        const formattedDay = day < 10 ? `0${day}` : `${day}`;
+        const formattedMonth = (month + 1) < 10 ? `0${month + 1}` : `${month + 1}`;
+        const dateKey = `${year}-${formattedMonth}-${formattedDay}`;
+
+        // Check Attendance Record for student
+        let status = null;
+        if (attendanceRecords[dateKey] && attendanceRecords[dateKey][currentHistoryStudentId]) {
+            status = attendanceRecords[dateKey][currentHistoryStudentId];
+            if (counts[status] !== undefined) counts[status]++;
+        }
+
+        let statusHtml = '';
+        let cellClass = '';
+        if (status) {
+            cellClass = `status-cell-${status}`;
+            statusHtml = `<div class="day-status-indicator">${status}</div>`;
+        }
+
+        gridBody.innerHTML += `
+            <div class="calendar-day-cell ${cellClass}">
+                <span class="day-number">${day}</span>
+                ${statusHtml}
+            </div>
+        `;
+    }
+
+    // Update Summary Stats
+    const statsContainer = document.getElementById('history-stats-summary');
+    statsContainer.innerHTML = `
+        <div class="history-stat-box"><div class="val text-emerald">${counts.Present}</div><div class="lbl">Present</div></div>
+        <div class="history-stat-box"><div class="val" style="color:var(--amber-text);">${counts.Late}</div><div class="lbl">Late</div></div>
+        <div class="history-stat-box"><div class="val text-rose">${counts.Absent}</div><div class="lbl">Absent</div></div>
+        <div class="history-stat-box"><div class="val" style="color:var(--blue-text);">${counts.Excused}</div><div class="lbl">Excused</div></div>
+    `;
+}
+
+// Load Attendance Sheet View
 function loadAttendanceSheet() {
     const dateEl = document.getElementById('att-date');
     const sectionEl = document.getElementById('att-section');
@@ -441,7 +530,7 @@ function markAllAttendance(status) {
     showToast(`Marked all as ${status}!`);
 }
 
-// Save Attendance Records to Supabase Cloud with Upsert
+// Save Attendance Records to Supabase Cloud
 async function saveAttendance() {
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
@@ -482,6 +571,67 @@ async function saveAttendance() {
         console.error("Unexpected error in saveAttendance:", err);
         showToast("An unexpected error occurred while saving attendance.", "error");
     }
+}
+
+// Export Attendance to PDF
+function exportAttendanceToPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    const dateEl = document.getElementById('att-date');
+    const sectionEl = document.getElementById('att-section');
+
+    const selectedDate = dateEl ? dateEl.value : '';
+    const selectedSection = sectionEl ? sectionEl.value : '';
+
+    if (!selectedSection) {
+        showToast("Pumili muna ng section bago mag-export.", "error");
+        return;
+    }
+
+    const secStudents = students.filter(s => s.section === selectedSection);
+
+    if (secStudents.length === 0) {
+        showToast("Walang estudyante sa napiling section.", "error");
+        return;
+    }
+
+    doc.setFontSize(18);
+    doc.text("Scholog — Attendance Report", 14, 20);
+
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Section: ${selectedSection}`, 14, 28);
+    doc.text(`Date: ${selectedDate}`, 14, 34);
+
+    const currentDaySheet = attendanceRecords[selectedDate] || {};
+    const tableRows = [];
+
+    secStudents.forEach((student, index) => {
+        const status = currentDaySheet[student.id] || 'Present';
+        tableRows.push([
+            index + 1,
+            student.name,
+            student.id,
+            student.email || 'N/A',
+            status
+        ]);
+    });
+
+    doc.autoTable({
+        startY: 42,
+        head: [['#', 'Student Name', 'Student ID', 'Email', 'Status']],
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42] },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        styles: { font: 'helvetica', fontSize: 10 }
+    });
+
+    const fileName = `Attendance_${selectedSection.replace(/\s+/g, '_')}_${selectedDate}.pdf`;
+    doc.save(fileName);
+
+    showToast("Nai-download na ang Attendance PDF!");
 }
 
 // Modal & Section Handlers
@@ -531,30 +681,58 @@ async function handleSectionSubmit(event) {
     }
 }
 
-async function deleteSection(sectionName) {
+// Custom Delete Section Modal Logic
+function deleteSection(sectionName) {
+    sectionToDelete = sectionName;
+    const nameEl = document.getElementById('delete-section-name');
+    if (nameEl) nameEl.innerText = sectionName;
+
+    const confirmBtn = document.getElementById('confirm-delete-section-btn');
+    if (confirmBtn) {
+        confirmBtn.onclick = async () => { await confirmDeleteSection(); };
+    }
+
+    document.getElementById('modal-delete-section').classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+}
+
+async function confirmDeleteSection() {
+    if (!sectionToDelete) return;
+
+    const confirmBtn = document.getElementById('confirm-delete-section-btn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerText = "Deleting...";
+    }
+
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         if (sessionError || !session || !session.user) return;
         const user = session.user;
 
-        if (confirm(`Are you sure you want to delete the section "${sectionName}"?`)) {
-            const { error } = await supabaseClient
-                .from('sections')
-                .delete()
-                .eq('name', sectionName)
-                .eq('user_id', user.id);
+        const { error } = await supabaseClient
+            .from('sections')
+            .delete()
+            .eq('name', sectionToDelete)
+            .eq('user_id', user.id);
 
-            if (error) {
-                console.error("Error deleting section:", error);
-                showToast(error.message, "error");
-            } else {
-                showToast("Section deleted successfully!");
-                await fetchStudentsFromSupabase();
-            }
+        if (error) {
+            console.error("Error deleting section:", error);
+            showToast(error.message, "error");
+        } else {
+            showToast("Section deleted successfully!");
+            closeModal('modal-delete-section');
+            await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in deleteSection:", err);
+        console.error("Unexpected error in confirmDeleteSection:", err);
         showToast("Failed to delete section.", "error");
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerText = "Delete Section";
+        }
+        sectionToDelete = null;
     }
 }
 
@@ -574,6 +752,70 @@ function openAddStudentModal() {
 function openAddStudentModalForSection(section) {
     openAddStudentModal();
     document.getElementById('stud-section').value = section;
+}
+
+// Transfer Student Modal Handler
+function openTransferModal(studentId) {
+    const student = students.find(s => s.id === studentId);
+    if (!student) return;
+
+    document.getElementById('transfer-student-id').value = student.id;
+    document.getElementById('transfer-student-name').value = student.name;
+
+    const selectEl = document.getElementById('transfer-new-section');
+    selectEl.innerHTML = '';
+
+    sections.forEach(sec => {
+        if (sec !== student.section) {
+            selectEl.innerHTML += `<option value="${sec}">${sec}</option>`;
+        }
+    });
+
+    if (selectEl.options.length === 0) {
+        showToast("No other section available to move into.", "error");
+        return;
+    }
+
+    document.getElementById('modal-transfer-student').classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+}
+
+async function handleTransferSubmit(event) {
+    event.preventDefault();
+    try {
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+        if (sessionError || !session || !session.user) {
+            showToast("Authentication required.", "error");
+            return;
+        }
+        const user = session.user;
+
+        const studentId = document.getElementById('transfer-student-id').value;
+        const newSection = document.getElementById('transfer-new-section').value;
+
+        if (!newSection) {
+            showToast("Please select a valid section.", "error");
+            return;
+        }
+
+        const { error } = await supabaseClient
+            .from('students')
+            .update({ section: newSection })
+            .eq('id', studentId)
+            .eq('user_id', user.id);
+
+        if (error) {
+            console.error("Error transferring student:", error);
+            showToast(error.message, "error");
+        } else {
+            showToast("Student successfully moved to " + newSection + "!");
+            closeModal('modal-transfer-student');
+            await fetchStudentsFromSupabase();
+        }
+    } catch (err) {
+        console.error("Unexpected error in handleTransferSubmit:", err);
+        showToast("Failed to transfer student.", "error");
+    }
 }
 
 function closeModal(modalId) {
@@ -614,6 +856,7 @@ async function handleStudentSubmit(event) {
     }
 }
 
+// Custom Delete Student Modal Logic
 function deleteStudent(id) {
     const student = students.find(s => s.id === id);
     if (!student) return;
