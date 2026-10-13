@@ -15,7 +15,7 @@ let activeDirectorySection = "";
 let studentToDeleteId = null;
 let sectionToDelete = null;
 
-// State variables para sa Calendar History View
+// State variables for Calendar History View
 let currentHistoryStudentId = null;
 let historyCurrentDate = new Date();
 
@@ -26,16 +26,20 @@ async function checkAuthGuard() {
         if (error || !session) {
             console.warn("No active session found. Redirecting to login.");
             window.location.href = 'index.html';
+            return false;
         }
+        return true;
     } catch (err) {
         console.error("Critical error in checkAuthGuard:", err);
         window.location.href = 'index.html';
+        return false;
     }
 }
 
 // Initializer Lifecycle
 document.addEventListener('DOMContentLoaded', async () => {
-    await checkAuthGuard();
+    const isAuthenticated = await checkAuthGuard();
+    if (!isAuthenticated) return;
 
     const todayStr = new Date().toISOString().split('T')[0];
     const attDateEl = document.getElementById('att-date');
@@ -352,7 +356,7 @@ function openStudentHistory(studentId) {
     if (!student) return;
 
     currentHistoryStudentId = studentId;
-    historyCurrentDate = new Date(); // Reset to current month
+    historyCurrentDate = new Date();
 
     document.getElementById('history-student-name').innerText = student.name;
     document.getElementById('history-student-info').innerText = `ID: ${student.id} | Section: ${student.section}`;
@@ -375,7 +379,6 @@ function renderCalendarGrid() {
     const year = historyCurrentDate.getFullYear();
     const month = historyCurrentDate.getMonth();
 
-    // Set Month Header Label
     const monthName = historyCurrentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     document.getElementById('history-month-label').innerText = monthName;
 
@@ -387,18 +390,15 @@ function renderCalendarGrid() {
 
     let counts = { Present: 0, Late: 0, Absent: 0, Excused: 0 };
 
-    // Fill Empty Leading Days
     for (let i = 0; i < firstDayIndex; i++) {
         gridBody.innerHTML += `<div class="calendar-day-cell empty"></div>`;
     }
 
-    // Render Each Day of Month
     for (let day = 1; day <= totalDaysInMonth; day++) {
         const formattedDay = day < 10 ? `0${day}` : `${day}`;
         const formattedMonth = (month + 1) < 10 ? `0${month + 1}` : `${month + 1}`;
         const dateKey = `${year}-${formattedMonth}-${formattedDay}`;
 
-        // Check Attendance Record for student
         let status = null;
         if (attendanceRecords[dateKey] && attendanceRecords[dateKey][currentHistoryStudentId]) {
             status = attendanceRecords[dateKey][currentHistoryStudentId];
@@ -420,7 +420,6 @@ function renderCalendarGrid() {
         `;
     }
 
-    // Update Summary Stats
     const statsContainer = document.getElementById('history-stats-summary');
     statsContainer.innerHTML = `
         <div class="history-stat-box"><div class="val text-emerald">${counts.Present}</div><div class="lbl">Present</div></div>

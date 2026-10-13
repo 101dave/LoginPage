@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function switchTab(tab) {
     const loginTab = document.getElementById('loginTab');
@@ -25,12 +25,14 @@ function switchTab(tab) {
 
 function showAlert(message, type) {
     const alertBox = document.getElementById('alertBox');
+    if (!alertBox) return;
     alertBox.textContent = message;
     alertBox.className = `alert ${type}`;
 }
 
 function hideAlert() {
     const alertBox = document.getElementById('alertBox');
+    if (!alertBox) return;
     alertBox.className = 'alert hidden';
 }
 
@@ -41,7 +43,7 @@ async function handleLogin(event) {
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
 
-    const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
         email,
         password,
     });
@@ -64,12 +66,12 @@ async function handleSignup(event) {
     const email = document.getElementById('signupEmail').value;
     const password = document.getElementById('signupPassword').value;
 
-    submitBtn.disabled = true;
-    const originalText = submitBtn.textContent;
-    submitBtn.textContent = 'Creating Account...';
+    if (submitBtn) submitBtn.disabled = true;
+    const originalHTML = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) submitBtn.textContent = 'Creating Account...';
 
     try {
-        const { data, error } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.signUp({
+        const { data, error } = await supabaseClient.auth.signUp({
             email,
             password,
         });
@@ -80,7 +82,10 @@ async function handleSignup(event) {
             showAlert('Signup successful! Please check your email for verification.', 'success');
         }
     } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalText;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHTML;
+            if (window.lucide) lucide.createIcons();
+        }
     }
 }
