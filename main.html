@@ -35,17 +35,22 @@
             </nav>
 
             <div class="nav-actions">
-                <button onclick="openAddSectionModal()" class="btn btn-secondary mobile-hide">
-                    <i data-lucide="folder-plus"></i>
-                    <span>Add Section</span>
-                </button>
-                <button onclick="openAddStudentModal()" class="btn btn-primary">
-                    <i data-lucide="user-plus"></i>
-                    <span class="mobile-hide">Add Student</span>
-                </button>
-                <button onclick="handleLogout()" class="btn" style="background-color: var(--rose-bg); color: var(--rose-text); border-color: var(--rose-border);">
+                <!-- User Profile Card (Clickable to edit profile) -->
+                <div class="user-profile-card" onclick="openProfileModal()" title="Click to edit profile">
+                    <div class="user-avatar-wrapper">
+                        <div class="user-avatar" id="userAvatar">U</div>
+                        <span class="profile-status-dot"></span>
+                    </div>
+                    <div class="user-info mobile-hide">
+                        <span class="user-name" id="userNameDisplay">Loading...</span>
+                        <span class="user-role-placeholder" style="font-size: 9px; margin-top: 1px; display: inline-block; width: fit-content; color: var(--text-muted);">User</span>
+                    </div>
+                    <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--text-muted);" class="mobile-hide"></i>
+                </div>
+
+                <button onclick="handleLogout()" class="btn btn-logout-icon mobile-hide" title="Logout">
                     <i data-lucide="log-out"></i>
-                    <span class="mobile-hide">Logout</span>
+                    <span>Logout</span>
                 </button>
                 <!-- Hamburger Toggle Button (Mobile Only) -->
                 <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide">
@@ -56,12 +61,18 @@
 
         <!-- Mobile Dropdown Hamburger Menu -->
         <div id="mobileMenu" class="mobile-dropdown-menu hidden">
-            <button onclick="switchTab('dashboard'); toggleMobileMenu()" id="mob-nav-dashboard" class="mob-menu-item active">Dashboard</button>
-            <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">Class List</button>
-            <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">Take Attendance</button>
+            <button onclick="switchTab('dashboard'); toggleMobileMenu()" id="mob-nav-dashboard" class="mob-menu-item active">
+                <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Dashboard
+            </button>
+            <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">
+                <i data-lucide="users" style="width: 16px; height: 16px;"></i> Class List
+            </button>
+            <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">
+                <i data-lucide="calendar-check" style="width: 16px; height: 16px;"></i> Take Attendance
+            </button>
             <div class="mob-menu-divider"></div>
-            <button onclick="handleLogout()" class="mob-menu-item" style="color: var(--rose-text);">
-                <i data-lucide="log-out" style="width:14px; height:14px;"></i> Logout
+            <button onclick="handleLogout()" class="mob-menu-item text-rose">
+                <i data-lucide="log-out" style="width: 16px; height: 16px;"></i> Logout
             </button>
         </div>
     </header>
@@ -128,7 +139,14 @@
                         <i data-lucide="search"></i>
                         <input type="text" id="directory-search" oninput="renderDirectory()" placeholder="Search name or ID...">
                     </div>
-                    <button onclick="openAddSectionModal()" class="btn btn-secondary desktop-hide">Add Section</button>
+                    <button onclick="openAddSectionModal()" class="btn btn-secondary">
+                        <i data-lucide="folder-plus"></i>
+                        <span>Add Section</span>
+                    </button>
+                    <button onclick="openAddStudentModal()" class="btn btn-primary">
+                        <i data-lucide="user-plus"></i>
+                        <span>Add Student</span>
+                    </button>
                 </div>
             </div>
 
@@ -143,7 +161,6 @@
                                 <th>Student</th>
                                 <th>Student ID</th>
                                 <th>Email</th>
-                                <th>Overall Attendance</th>
                                 <th class="text-right">Actions</th>
                             </tr>
                         </thead>
@@ -212,7 +229,114 @@
         </section>
     </main>
 
-    <!-- Modals -->
+    <!-- Modal: Profile Settings & Backup Data -->
+    <div id="modal-profile" class="modal-backdrop hidden">
+        <div class="modal-content" style="max-width: 440px;">
+            <div class="modal-header">
+                <h3>Profile Settings</h3>
+                <button onclick="closeModal('modal-profile')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            
+            <form onsubmit="handleProfileSubmit(event)" class="modal-form">
+                <!-- Profile Avatar Preview -->
+                <div class="profile-preview-container">
+                    <div class="profile-preview-avatar" id="modalPreviewAvatar">U</div>
+                </div>
+
+                <div class="input-group">
+                    <label>Display Name</label>
+                    <input type="text" id="profile-display-name" required placeholder="e.g. Teacher Maria" class="form-control">
+                </div>
+
+                <div class="input-group">
+                    <label>Profile Picture</label>
+                    <div class="custom-file-upload">
+                        <label for="profile-image-file" class="file-select-btn">
+                            <i data-lucide="image"></i> <span id="profile-file-name">Select a profile picture...</span>
+                        </label>
+                        <input type="file" id="profile-image-file" accept="image/*" onchange="previewProfileImage(event)">
+                    </div>
+                </div>
+
+                <div style="margin-top: 4px;">
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">
+                        <i data-lucide="save"></i> Save Profile Changes
+                    </button>
+                </div>
+            </form>
+
+            <div class="profile-section-divider"></div>
+
+            <!-- Backup & Restore Data Section -->
+            <div class="profile-extra-section">
+                <h4><i data-lucide="database" style="width: 16px; height: 16px;"></i> Data Management</h4>
+                <p>Download and backup your file or restore your file.</p>
+                <div class="profile-actions-grid">
+                    <button type="button" onclick="exportDataBackup()" class="btn btn-secondary">
+                        <i data-lucide="download"></i> Backup
+                    </button>
+                    <label class="btn btn-secondary custom-restore-btn">
+                        <i data-lucide="upload"></i> Restore Data
+                        <input type="file" id="importFile" accept=".json" onchange="importDataBackup(event)">
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Attendance History -->
+    <div id="modal-attendance-history" class="modal-backdrop hidden">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="history-student-name">Student History</h3>
+                    <p id="history-student-info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;"></p>
+                </div>
+                <button onclick="closeModal('modal-attendance-history')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="history-month-nav">
+                <button onclick="changeHistoryMonth(-1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 30px;"><i data-lucide="chevron-left"></i></button>
+                <span id="history-month-label" style="font-weight: 700; font-size: 13px;">Month Year</span>
+                <button onclick="changeHistoryMonth(1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 30px;"><i data-lucide="chevron-right"></i></button>
+            </div>
+
+            <div class="calendar-container">
+                <div class="calendar-days-header">
+                    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div id="calendar-grid-body" class="calendar-grid"></div>
+            </div>
+
+            <div id="history-stats-summary" class="history-stats"></div>
+
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-attendance-history')" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Section -->
+    <div id="modal-section" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>Add Section</h3>
+                <button onclick="closeModal('modal-section')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <form onsubmit="handleSectionSubmit(event)" class="modal-form">
+                <div class="input-group">
+                    <label>Section Name</label>
+                    <input type="text" id="new-section-name" required placeholder="e.g. Grade 11 - STEM" class="form-control">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-section')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Section</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Add/Edit Student -->
     <div id="modal-student" class="modal-backdrop hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -228,16 +352,16 @@
                 <div class="grid-2">
                     <div class="input-group">
                         <label>Student ID</label>
-                        <input type="text" id="stud-id" required placeholder="e.g. STU-1005" class="form-control">
+                        <input type="text" id="stud-id" required placeholder="e.g. 2026-0001" class="form-control">
                     </div>
                     <div class="input-group">
-                        <label>Grade & Section</label>
-                        <select id="stud-section" required class="form-control"></select>
+                        <label>Section</label>
+                        <select id="stud-section" class="form-control"></select>
                     </div>
                 </div>
                 <div class="input-group">
                     <label>Email Address</label>
-                    <input type="email" id="stud-email" required placeholder="juan@example.com" class="form-control">
+                    <input type="email" id="stud-email" placeholder="student@example.com" class="form-control">
                 </div>
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-student')" class="btn btn-secondary">Cancel</button>
@@ -247,41 +371,22 @@
         </div>
     </div>
 
-    <div id="modal-section" class="modal-backdrop hidden">
-        <div class="modal-content modal-sm">
-            <div class="modal-header">
-                <h3>Add New Section</h3>
-                <button onclick="closeModal('modal-section')" class="close-btn"><i data-lucide="x"></i></button>
-            </div>
-            <form onsubmit="handleSectionSubmit(event)" class="modal-form">
-                <div class="input-group">
-                    <label>Grade Level & Section Name</label>
-                    <input type="text" id="new-section-name" required placeholder="e.g. Grade 11 - Sapphire" class="form-control">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" onclick="closeModal('modal-section')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Section</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal: Transfer Student Section -->
+    <!-- Modal: Transfer Student -->
     <div id="modal-transfer-student" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
-                <h3>Transfer Section</h3>
+                <h3>Move Student</h3>
                 <button onclick="closeModal('modal-transfer-student')" class="close-btn"><i data-lucide="x"></i></button>
             </div>
             <form onsubmit="handleTransferSubmit(event)" class="modal-form">
                 <input type="hidden" id="transfer-student-id">
                 <div class="input-group">
                     <label>Student Name</label>
-                    <input type="text" id="transfer-student-name" class="form-control" readonly style="background-color: var(--border-light);">
+                    <input type="text" id="transfer-student-name" readonly disabled class="form-control">
                 </div>
                 <div class="input-group">
-                    <label>Select New Section</label>
-                    <select id="transfer-new-section" class="form-control" required></select>
+                    <label>Target Section</label>
+                    <select id="transfer-new-section" class="form-control"></select>
                 </div>
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-transfer-student')" class="btn btn-secondary">Cancel</button>
@@ -291,84 +396,36 @@
         </div>
     </div>
 
-    <!-- Modal: Attendance History Calendar -->
-    <div id="modal-attendance-history" class="modal-backdrop hidden">
-        <div class="modal-content" style="max-width: 580px;">
-            <div class="modal-header">
-                <div>
-                    <h3 id="history-student-name">Student Attendance History</h3>
-                    <p id="history-student-info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;"></p>
-                </div>
-                <button onclick="closeModal('modal-attendance-history')" class="close-btn"><i data-lucide="x"></i></button>
-            </div>
-
-            <!-- Month Navigation Controls -->
-            <div class="history-month-nav">
-                <button onclick="changeHistoryMonth(-1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 32px;">
-                    <i data-lucide="chevron-left"></i>
-                </button>
-                <span id="history-month-label" style="font-weight: 700; font-size: 14px;">Month Year</span>
-                <button onclick="changeHistoryMonth(1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 32px;">
-                    <i data-lucide="chevron-right"></i>
-                </button>
-            </div>
-
-            <!-- Attendance Legend -->
-            <div class="legend-group" style="justify-content: center; gap: 12px; margin: 8px 0;">
-                <span><span class="dot dot-emerald"></span>Present</span>
-                <span><span class="dot dot-amber"></span>Late</span>
-                <span><span class="dot dot-rose"></span>Absent</span>
-                <span><span class="dot dot-blue"></span>Excused</span>
-                <span><span class="dot" style="background:#e2e8f0;"></span>No Record</span>
-            </div>
-
-            <!-- Calendar Grid -->
-            <div class="calendar-container">
-                <div class="calendar-days-header">
-                    <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
-                </div>
-                <div id="calendar-grid-body" class="calendar-grid"></div>
-            </div>
-
-            <!-- Summary Statistics for the Selected Month -->
-            <div id="history-stats-summary" class="history-stats"></div>
-        </div>
-    </div>
-
-    <!-- Modal: Delete Student -->
-    <div id="modal-delete-student" class="modal-backdrop hidden">
-        <div class="modal-content modal-sm">
-            <div class="modal-header">
-                <h3 style="color: var(--rose-text); display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="alert-triangle"></i> Delete Student
-                </h3>
-                <button onclick="closeModal('modal-delete-student')" class="close-btn"><i data-lucide="x"></i></button>
-            </div>
-            <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-                Are you sure you want to delete <strong id="delete-student-name" style="color: var(--text-main);"></strong>? This action cannot be undone.
-            </div>
-            <div class="modal-footer">
-                <button type="button" onclick="closeModal('modal-delete-student')" class="btn btn-secondary">Cancel</button>
-                <button type="button" id="confirm-delete-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: Delete Section -->
+    <!-- Modal: Confirm Delete Section -->
     <div id="modal-delete-section" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
-                <h3 style="color: var(--rose-text); display: flex; align-items: center; gap: 8px;">
-                    <i data-lucide="alert-triangle"></i> Delete Section
-                </h3>
+                <h3 style="color: var(--rose-text);">Delete Section</h3>
                 <button onclick="closeModal('modal-delete-section')" class="close-btn"><i data-lucide="x"></i></button>
             </div>
-            <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-                Are you sure you want to delete section <strong id="delete-section-name" style="color: var(--text-main);"></strong>? This action cannot be undone.
+            <div style="font-size: 13px; color: var(--text-muted);">
+                Are you sure you want to delete section <strong id="delete-section-name"></strong>? All students inside this section will also be deleted.
             </div>
             <div class="modal-footer">
                 <button type="button" onclick="closeModal('modal-delete-section')" class="btn btn-secondary">Cancel</button>
                 <button type="button" id="confirm-delete-section-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete Section</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirm Delete Student -->
+    <div id="modal-delete-student" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3 style="color: var(--rose-text);">Delete Student</h3>
+                <button onclick="closeModal('modal-delete-student')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted);">
+                Are you sure you want to delete <strong id="delete-student-name"></strong>?
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-delete-student')" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="confirm-delete-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete Student</button>
             </div>
         </div>
     </div>

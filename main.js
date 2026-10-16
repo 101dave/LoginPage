@@ -36,10 +36,156 @@ async function checkAuthGuard() {
     }
 }
 
+// Function para i-load at i-customize ang User Profile sa Header
+async function loadUserProfile() {
+    try {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (error || !session || !session.user) return;
+
+        const user = session.user;
+        const email = user.email || 'User';
+        
+        const userKey = `scholog_profile_${user.id}`;
+        const savedProfile = JSON.parse(localStorage.getItem(userKey) || '{}');
+
+        const customName = savedProfile.name || user.user_metadata?.display_name || '';
+        const customAvatar = savedProfile.avatar || user.user_metadata?.avatar_url || '';
+
+        const displayName = customName ? customName : email;
+        const initial = email.charAt(0).toUpperCase();
+
+        // Desktop Elements Update
+        const userNameDisplay = document.getElementById('userNameDisplay');
+        const userAvatarEl = document.getElementById('userAvatar');
+        
+        if (userNameDisplay) userNameDisplay.innerText = displayName;
+        if (userAvatarEl) {
+            if (customAvatar) {
+                userAvatarEl.innerHTML = `<img src="${customAvatar}" alt="Profile" onerror="this.parentElement.innerHTML='${initial}'">`;
+            } else {
+                userAvatarEl.innerText = initial;
+            }
+        }
+
+    } catch (err) {
+        console.error("Error loading user profile:", err);
+    }
+}
+
+// Buksan ang Customize Profile Modal
+function openProfileModal() {
+    const modal = document.getElementById('modal-profile');
+    if (!modal) return;
+
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+        if (!session || !session.user) return;
+        const userKey = `scholog_profile_${session.user.id}`;
+        const savedProfile = JSON.parse(localStorage.getItem(userKey) || '{}');
+
+        const savedName = savedProfile.name || session.user.user_metadata?.display_name || '';
+        const savedAvatar = savedProfile.avatar || session.user.user_metadata?.avatar_url || '';
+        
+        document.getElementById('profile-display-name').value = savedName;
+        
+        const previewAvatar = document.getElementById('modalPreviewAvatar');
+        const fileNameDisplay = document.getElementById('profile-file-name');
+
+        if (previewAvatar) {
+            if (savedAvatar) {
+                previewAvatar.innerHTML = `<img src="${savedAvatar}" alt="Preview" style="width:100%; height:100%; object-fit:cover;">`;
+                if (fileNameDisplay) fileNameDisplay.innerText = 'Change profile picture';
+            } else {
+                const emailInitial = savedName ? savedName.charAt(0).toUpperCase() : session.user.email.charAt(0).toUpperCase();
+                previewAvatar.innerText = emailInitial;
+                if (fileNameDisplay) fileNameDisplay.innerText = 'Select a profile picture...';
+            }
+        }
+        
+        const fileInput = document.getElementById('profile-image-file');
+        if (fileInput) fileInput.value = '';
+
+        modal.classList.remove('hidden');
+        if (window.lucide) lucide.createIcons();
+    });
+}
+
+// Live Image Preview at file name update
+function previewProfileImage(event) {
+    const file = event.target.files[0];
+    const fileNameDisplay = document.getElementById('profile-file-name');
+    
+    if (file) {
+        if (fileNameDisplay) fileNameDisplay.innerText = file.name;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const previewAvatar = document.getElementById('modalPreviewAvatar');
+            if (previewAvatar) {
+                previewAvatar.innerHTML = `<img src="${e.target.result}" alt="Preview" style="width:100%; height:100%; object-fit:cover;">`;
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// I-save ang Profile Customization gamit ang User ID Key at Supabase Metadata
+async function handleProfileSubmit(event) {
+    event.preventDefault();
+    
+    const displayName = document.getElementById('profile-display-name').value.trim();
+    const fileInput = document.getElementById('profile-image-file');
+
+    try {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (error || !session || !session.user) {
+            showToast("Session expired. Please sign in again.", "error");
+            return;
+        }
+
+        const userKey = `scholog_profile_${session.user.id}`;
+        let existingProfile = JSON.parse(localStorage.getItem(userKey) || '{}');
+        existingProfile.name = displayName;
+
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = async function(e) {
+                existingProfile.avatar = e.target.result;
+                localStorage.setItem(userKey, JSON.stringify(existingProfile));
+
+                await supabaseClient.auth.updateUser({
+                    data: { display_name: displayName, avatar_url: e.target.result }
+                });
+
+                showToast("Profile updated successfully!");
+                closeModal('modal-profile');
+                loadUserProfile();
+            };
+            reader.readAsDataURL(file);
+        } else {
+            localStorage.setItem(userKey, JSON.stringify(existingProfile));
+
+            await supabaseClient.auth.updateUser({
+                data: { display_name: displayName }
+            });
+
+            showToast("Profile updated successfully!");
+            closeModal('modal-profile');
+            loadUserProfile();
+        }
+
+    } catch (err) {
+        console.error("Error saving profile:", err);
+        showToast("Failed to update profile.", "error");
+    }
+}
+
 // Initializer Lifecycle
 document.addEventListener('DOMContentLoaded', async () => {
     const isAuthenticated = await checkAuthGuard();
     if (!isAuthenticated) return;
+
+    await loadUserProfile();
 
     const todayStr = new Date().toISOString().split('T')[0];
     const attDateEl = document.getElementById('att-date');
@@ -132,6 +278,107 @@ async function fetchStudentsFromSupabase() {
         console.error("Unexpected error in fetchStudentsFromSupabase:", err);
         showToast("Failed to synchronize data from cloud.", "error");
     }
+}
+
+// ==========================================
+// DATA BACKUP & RESTORE FEATURE (JSON)
+// ==========================================
+async function exportDataBackup() {
+    try {
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+        if (sessionError || !session || !session.user) {
+            showToast("Authentication required for backup.", "error");
+            return;
+        }
+        const userId = session.user.id;
+
+        const { data: secData } = await supabaseClient.from('sections').select('*').eq('user_id', userId);
+        const { data: studData } = await supabaseClient.from('students').select('*').eq('user_id', userId);
+        const { data: attData } = await supabaseClient.from('attendance').select('*').eq('user_id', userId);
+
+        const backupPayload = {
+            version: "1.0",
+            exportDate: new Date().toISOString(),
+            sections: secData || [],
+            students: studData || [],
+            attendance: attData || []
+        };
+
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupPayload, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `Scholog_Backup_${new Date().toISOString().split('T')[0]}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+
+        showToast("Backup downloaded successfully!");
+    } catch (err) {
+        console.error("Export backup error:", err);
+        showToast("Failed to export backup data.", "error");
+    }
+}
+
+async function importDataBackup(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const content = e.target.result;
+            const parsedData = JSON.parse(content);
+
+            if (!parsedData.sections || !parsedData.students || !parsedData.attendance) {
+                showToast("Invalid backup file format.", "error");
+                return;
+            }
+
+            const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+            if (sessionError || !session || !session.user) {
+                showToast("Authentication required to restore data.", "error");
+                return;
+            }
+            const userId = session.user.id;
+
+            const sectionsToInsert = parsedData.sections.map(s => ({ name: s.name, user_id: userId }));
+            const studentsToInsert = parsedData.students.map(st => ({
+                id: st.id,
+                name: st.name,
+                section: st.section,
+                email: st.email,
+                user_id: userId
+            }));
+            const attendanceToInsert = parsedData.attendance.map(at => ({
+                student_id: at.student_id,
+                date: at.date,
+                status: at.status,
+                user_id: userId
+            }));
+
+            if (sectionsToInsert.length > 0) {
+                await supabaseClient.from('sections').upsert(sectionsToInsert, { onConflict: 'user_id,name' });
+            }
+
+            if (studentsToInsert.length > 0) {
+                await supabaseClient.from('students').upsert(studentsToInsert, { onConflict: 'user_id,id' });
+            }
+
+            if (attendanceToInsert.length > 0) {
+                await supabaseClient.from('attendance').upsert(attendanceToInsert, { onConflict: 'user_id,student_id,date' });
+            }
+
+            showToast("Data restored successfully!");
+            await fetchStudentsFromSupabase();
+
+        } catch (err) {
+            console.error("Import backup error:", err);
+            showToast("Failed to parse or restore backup file.", "error");
+        } finally {
+            event.target.value = '';
+        }
+    };
+    reader.readAsText(file);
 }
 
 // Toast Notification System
@@ -285,7 +532,7 @@ function renderDirectory() {
         activeDirectorySection = "";
         tabsContainer.innerHTML = `<span style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">No sections available.</span>`;
         bannerContainer.innerHTML = `<div><h3>No Section Selected</h3><p>Please add a section first</p></div>`;
-        tbody.innerHTML = `<tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No sections or students found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No sections or students found.</td></tr>`;
         return;
     }
 
@@ -321,7 +568,7 @@ function renderDirectory() {
 
     tbody.innerHTML = '';
     if (sectionStudents.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No students found in this section.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="padding: 32px; text-align: center; color: var(--text-muted); font-size: 12px;">No students found in this section.</td></tr>`;
         return;
     }
 
@@ -338,10 +585,10 @@ function renderDirectory() {
                 </td>
                 <td class="font-mono">${s.id}</td>
                 <td style="color: var(--text-muted);">${s.email}</td>
-                <td><span class="badge badge-emerald">Active</span></td>
                 <td class="text-right">
                     <button onclick="openStudentHistory('${s.id}')" style="background:none; border:none; color:var(--emerald-text); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">History</button>
-                    <button onclick="openTransferModal('${s.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">Move</button>
+                    <button onclick="openAddStudentModal('${s.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">Edit</button>
+                    <button onclick="openTransferModal('${s.id}')" style="background:none; border:none; color:var(--blue-text); cursor:pointer; font-size:12px; font-weight:600; margin-right:8px;">Move</button>
                     <button onclick="deleteStudent('${s.id}')" style="background:none; border:none; color:var(--rose-text); cursor:pointer; font-size:12px; font-weight:500;">Delete</button>
                 </td>
             </tr>
@@ -366,13 +613,13 @@ function openStudentHistory(studentId) {
     if (window.lucide) lucide.createIcons();
 }
 
-// Change Month Navigation
+// FIXED: Calendar month skipping bug resolved by setting date to 1 first
 function changeHistoryMonth(offset) {
+    historyCurrentDate.setDate(1);
     historyCurrentDate.setMonth(historyCurrentDate.getMonth() + offset);
     renderCalendarGrid();
 }
 
-// Render Calendar Grid & Calculate Monthly Totals
 function renderCalendarGrid() {
     if (!currentHistoryStudentId) return;
 
@@ -466,12 +713,10 @@ function loadAttendanceSheet() {
         return;
     }
 
-    if (!attendanceRecords[selectedDate]) {
-        attendanceRecords[selectedDate] = {};
-    }
-
     secStudents.forEach((student, index) => {
-        const currentStatus = attendanceRecords[selectedDate][student.id] || 'Present';
+        const currentStatus = (attendanceRecords[selectedDate] && attendanceRecords[selectedDate][student.id]) 
+            ? attendanceRecords[selectedDate][student.id] 
+            : '';
 
         const row = document.createElement('tr');
         row.innerHTML = `
@@ -529,7 +774,6 @@ function markAllAttendance(status) {
     showToast(`Marked all as ${status}!`);
 }
 
-// Save Attendance Records to Supabase Cloud
 async function saveAttendance() {
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
@@ -561,18 +805,15 @@ async function saveAttendance() {
             .upsert(upsertData, { onConflict: 'user_id,student_id,date' });
 
         if (error) {
-            console.error("Supabase attendance upsert error:", error);
             showToast("Failed to save attendance: " + error.message, "error");
         } else {
             showToast("Attendance saved successfully to cloud!");
         }
     } catch (err) {
-        console.error("Unexpected error in saveAttendance:", err);
         showToast("An unexpected error occurred while saving attendance.", "error");
     }
 }
 
-// Export Attendance to PDF
 function exportAttendanceToPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -584,14 +825,13 @@ function exportAttendanceToPDF() {
     const selectedSection = sectionEl ? sectionEl.value : '';
 
     if (!selectedSection) {
-        showToast("Pumili muna ng section bago mag-export.", "error");
+        showToast("Please select a section before exporting.", "error");
         return;
     }
 
     const secStudents = students.filter(s => s.section === selectedSection);
-
     if (secStudents.length === 0) {
-        showToast("Walang estudyante sa napiling section.", "error");
+        showToast("No students in the selected section.", "error");
         return;
     }
 
@@ -627,13 +867,10 @@ function exportAttendanceToPDF() {
         styles: { font: 'helvetica', fontSize: 10 }
     });
 
-    const fileName = `Attendance_${selectedSection.replace(/\s+/g, '_')}_${selectedDate}.pdf`;
-    doc.save(fileName);
-
+    doc.save(`Attendance_${selectedSection.replace(/\s+/g, '_')}_${selectedDate}.pdf`);
     showToast("Nai-download na ang Attendance PDF!");
 }
 
-// Modal & Section Handlers
 function openAddSectionModal() {
     const modal = document.getElementById('modal-section');
     if (modal) {
@@ -647,10 +884,7 @@ async function handleSectionSubmit(event) {
     event.preventDefault();
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-        if (sessionError || !session || !session.user) {
-            showToast("Authentication required.", "error");
-            return;
-        }
+        if (sessionError || !session || !session.user) return;
         const user = session.user;
 
         const sectionInput = document.getElementById('new-section-name');
@@ -667,7 +901,6 @@ async function handleSectionSubmit(event) {
             .insert([{ name: newSection, user_id: user.id }]);
 
         if (error) {
-            console.error("Error inserting section:", error);
             showToast(error.message, "error");
         } else {
             closeModal('modal-section');
@@ -675,12 +908,10 @@ async function handleSectionSubmit(event) {
             await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in handleSectionSubmit:", err);
         showToast("Failed to add section.", "error");
     }
 }
 
-// Custom Delete Section Modal Logic
 function deleteSection(sectionName) {
     sectionToDelete = sectionName;
     const nameEl = document.getElementById('delete-section-name');
@@ -697,13 +928,6 @@ function deleteSection(sectionName) {
 
 async function confirmDeleteSection() {
     if (!sectionToDelete) return;
-
-    const confirmBtn = document.getElementById('confirm-delete-section-btn');
-    if (confirmBtn) {
-        confirmBtn.disabled = true;
-        confirmBtn.innerText = "Deleting...";
-    }
-
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         if (sessionError || !session || !session.user) return;
@@ -716,7 +940,6 @@ async function confirmDeleteSection() {
             .eq('user_id', user.id);
 
         if (error) {
-            console.error("Error deleting section:", error);
             showToast(error.message, "error");
         } else {
             showToast("Section deleted successfully!");
@@ -724,27 +947,44 @@ async function confirmDeleteSection() {
             await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in confirmDeleteSection:", err);
         showToast("Failed to delete section.", "error");
     } finally {
-        if (confirmBtn) {
-            confirmBtn.disabled = false;
-            confirmBtn.innerText = "Delete Section";
-        }
         sectionToDelete = null;
     }
 }
 
-function openAddStudentModal() {
+// UPDATED: Now supports both Add and Edit Student functionality
+function openAddStudentModal(studentId = null) {
     if (sections.length === 0) {
         showToast("Please add a section first before adding students.", "error");
         openAddSectionModal();
         return;
     }
-    document.getElementById('student-modal-title').innerText = "Add New Student";
-    document.getElementById('form-student').reset();
-    document.getElementById('student-edit-id').value = "";
-    document.getElementById('stud-section').value = activeDirectorySection || sections[0];
+    
+    const modalTitle = document.getElementById('student-modal-title');
+    const form = document.getElementById('form-student');
+    form.reset();
+    
+    if (studentId) {
+        // Edit Mode
+        modalTitle.innerText = "Edit Student";
+        const student = students.find(s => s.id === studentId);
+        if (student) {
+            document.getElementById('student-edit-id').value = student.id;
+            document.getElementById('stud-name').value = student.name;
+            document.getElementById('stud-id').value = student.id;
+            document.getElementById('stud-id').disabled = true; // Prevent changing primary key ID
+            document.getElementById('stud-section').value = student.section;
+            document.getElementById('stud-email').value = student.email || '';
+        }
+    } else {
+        // Add Mode
+        modalTitle.innerText = "Add New Student";
+        document.getElementById('student-edit-id').value = "";
+        document.getElementById('stud-id').disabled = false;
+        document.getElementById('stud-section').value = activeDirectorySection || sections[0];
+    }
+    
     document.getElementById('modal-student').classList.remove('hidden');
 }
 
@@ -753,7 +993,6 @@ function openAddStudentModalForSection(section) {
     document.getElementById('stud-section').value = section;
 }
 
-// Transfer Student Modal Handler
 function openTransferModal(studentId) {
     const student = students.find(s => s.id === studentId);
     if (!student) return;
@@ -783,19 +1022,11 @@ async function handleTransferSubmit(event) {
     event.preventDefault();
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-        if (sessionError || !session || !session.user) {
-            showToast("Authentication required.", "error");
-            return;
-        }
+        if (sessionError || !session || !session.user) return;
         const user = session.user;
 
         const studentId = document.getElementById('transfer-student-id').value;
         const newSection = document.getElementById('transfer-new-section').value;
-
-        if (!newSection) {
-            showToast("Please select a valid section.", "error");
-            return;
-        }
 
         const { error } = await supabaseClient
             .from('students')
@@ -804,7 +1035,6 @@ async function handleTransferSubmit(event) {
             .eq('user_id', user.id);
 
         if (error) {
-            console.error("Error transferring student:", error);
             showToast(error.message, "error");
         } else {
             showToast("Student successfully moved to " + newSection + "!");
@@ -812,7 +1042,6 @@ async function handleTransferSubmit(event) {
             await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in handleTransferSubmit:", err);
         showToast("Failed to transfer student.", "error");
     }
 }
@@ -822,40 +1051,56 @@ function closeModal(modalId) {
     if (modal) modal.classList.add('hidden');
 }
 
+// UPDATED: Handles both Insert (New) and Update (Edit) with duplicate validation check
 async function handleStudentSubmit(event) {
     event.preventDefault();
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-        if (sessionError || !session || !session.user) {
-            showToast("You need to log in again.", "error");
-            return;
-        }
+        if (sessionError || !session || !session.user) return;
         const user = session.user;
 
+        const editId = document.getElementById('student-edit-id').value;
         const name = document.getElementById('stud-name').value.trim();
         const id = document.getElementById('stud-id').value.trim();
         const section = document.getElementById('stud-section').value;
         const email = document.getElementById('stud-email').value.trim();
 
-        const { error } = await supabaseClient
-            .from('students')
-            .insert([{ id, name, section, email, user_id: user.id }]);
+        let error;
+        if (editId) {
+            // Update existing student
+            const res = await supabaseClient
+                .from('students')
+                .update({ name, section, email })
+                .eq('id', editId)
+                .eq('user_id', user.id);
+            error = res.error;
+        } else {
+            // Check duplicate ID locally first
+            const existing = students.find(s => s.id === id);
+            if (existing) {
+                showToast("Student ID already exists!", "error");
+                return;
+            }
+
+            // Insert new student
+            const res = await supabaseClient
+                .from('students')
+                .insert([{ id, name, section, email, user_id: user.id }]);
+            error = res.error;
+        }
 
         if (error) {
-            console.error("Error inserting student:", error);
             showToast(error.message, "error");
         } else {
-            showToast("Student successfully added to Supabase!");
+            showToast(editId ? "Student successfully updated!" : "Student successfully added!");
             closeModal('modal-student');
             await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in handleStudentSubmit:", err);
-        showToast("Failed to add student.", "error");
+        showToast("Failed to save student data.", "error");
     }
 }
 
-// Custom Delete Student Modal Logic
 function deleteStudent(id) {
     const student = students.find(s => s.id === id);
     if (!student) return;
@@ -875,13 +1120,6 @@ function deleteStudent(id) {
 
 async function confirmDeleteStudent() {
     if (!studentToDeleteId) return;
-
-    const confirmBtn = document.getElementById('confirm-delete-btn');
-    if (confirmBtn) {
-        confirmBtn.disabled = true;
-        confirmBtn.innerText = "Deleting...";
-    }
-
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         if (sessionError || !session || !session.user) return;
@@ -894,7 +1132,6 @@ async function confirmDeleteStudent() {
             .eq('user_id', user.id);
 
         if (error) {
-            console.error("Error deleting student:", error);
             showToast(error.message, "error");
         } else {
             showToast("Student deleted successfully!");
@@ -902,29 +1139,18 @@ async function confirmDeleteStudent() {
             await fetchStudentsFromSupabase();
         }
     } catch (err) {
-        console.error("Unexpected error in confirmDeleteStudent:", err);
         showToast("Failed to delete student.", "error");
     } finally {
-        if (confirmBtn) {
-            confirmBtn.disabled = false;
-            confirmBtn.innerText = "Delete";
-        }
         studentToDeleteId = null;
     }
 }
 
 async function handleLogout() {
     try {
-        const { error } = await supabaseClient.auth.signOut();
-        if (error) {
-            console.error("Error during logout:", error);
-            showToast("Error during logout", "error");
-        } else {
-            showToast("Logged out successfully! Redirecting...", "success");
-            setTimeout(() => { window.location.href = 'index.html'; }, 1000);
-        }
+        await supabaseClient.auth.signOut();
+        showToast("Logged out successfully! Redirecting...", "success");
+        setTimeout(() => { window.location.href = 'index.html'; }, 1000);
     } catch (err) {
-        console.error("Unexpected error in handleLogout:", err);
         window.location.href = 'index.html';
     }
 }
