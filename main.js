@@ -54,7 +54,6 @@ async function loadUserProfile() {
         const displayName = customName ? customName : email;
         const initial = email.charAt(0).toUpperCase();
 
-        // Desktop Elements Update
         const userNameDisplay = document.getElementById('userNameDisplay');
         const userAvatarEl = document.getElementById('userAvatar');
         
@@ -72,7 +71,6 @@ async function loadUserProfile() {
     }
 }
 
-// Buksan ang Customize Profile Modal
 function openProfileModal() {
     const modal = document.getElementById('modal-profile');
     if (!modal) return;
@@ -109,7 +107,6 @@ function openProfileModal() {
     });
 }
 
-// Live Image Preview at file name update
 function previewProfileImage(event) {
     const file = event.target.files[0];
     const fileNameDisplay = document.getElementById('profile-file-name');
@@ -127,7 +124,6 @@ function previewProfileImage(event) {
     }
 }
 
-// I-save ang Profile Customization gamit ang User ID Key at Supabase Metadata
 async function handleProfileSubmit(event) {
     event.preventDefault();
     
@@ -180,7 +176,6 @@ async function handleProfileSubmit(event) {
     }
 }
 
-// Initializer Lifecycle
 document.addEventListener('DOMContentLoaded', async () => {
     const isAuthenticated = await checkAuthGuard();
     if (!isAuthenticated) return;
@@ -197,7 +192,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// Toggle Mobile Hamburger Menu
 function toggleMobileMenu() {
     const menu = document.getElementById('mobileMenu');
     if (menu) {
@@ -205,7 +199,6 @@ function toggleMobileMenu() {
     }
 }
 
-// Fetch All Data from Supabase Cloud Database
 async function fetchStudentsFromSupabase() {
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
@@ -218,11 +211,11 @@ async function fetchStudentsFromSupabase() {
         // 1. Fetch Sections
         const { data: secData, error: secError } = await supabaseClient
             .from('sections')
-            .select('name')
+            .select('*')
             .eq('user_id', user.id);
 
         if (secError) {
-            console.error("Error fetching sections:", secError);
+            console.error("Error fetching sections:", JSON.stringify(secError, null, 2));
             showToast("Error loading sections", "error");
             sections = [];
         } else {
@@ -240,7 +233,7 @@ async function fetchStudentsFromSupabase() {
             .eq('user_id', user.id);
 
         if (studError) {
-            console.error("Error fetching students:", studError);
+            console.error("Error fetching students:", JSON.stringify(studError, null, 2));
             showToast("Error loading students", "error");
             students = [];
         } else {
@@ -254,7 +247,7 @@ async function fetchStudentsFromSupabase() {
             .eq('user_id', user.id);
 
         if (attError) {
-            console.error("Error fetching attendance records:", attError);
+            console.error("Error fetching attendance records:", JSON.stringify(attError, null, 2));
             showToast("Error loading attendance records", "error");
             attendanceRecords = {};
         } else {
@@ -280,9 +273,6 @@ async function fetchStudentsFromSupabase() {
     }
 }
 
-// ==========================================
-// DATA BACKUP & RESTORE FEATURE (JSON)
-// ==========================================
 async function exportDataBackup() {
     try {
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
@@ -381,7 +371,6 @@ async function importDataBackup(event) {
     reader.readAsText(file);
 }
 
-// Toast Notification System
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -398,7 +387,6 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
-// Tab Switching Navigation
 function switchTab(tabName) {
     ['dashboard', 'directory', 'attendance'].forEach(t => {
         const viewEl = document.getElementById(`view-${t}`);
@@ -421,7 +409,6 @@ function switchTab(tabName) {
     if (tabName === 'attendance') loadAttendanceSheet();
 }
 
-// Populate Section Select Dropdowns
 function populateDropdowns() {
     const attSelect = document.getElementById('att-section');
     const studSelect = document.getElementById('stud-section');
@@ -441,7 +428,6 @@ function populateDropdowns() {
     });
 }
 
-// Render Dashboard View & Metrics
 function renderDashboard() {
     const todayStr = new Date().toISOString().split('T')[0];
     const dateLabel = document.getElementById('dash-date-label');
@@ -516,7 +502,6 @@ function renderDashboard() {
     if (window.lucide) lucide.createIcons();
 }
 
-// Render Class List View
 function renderDirectory() {
     const tabsContainer = document.getElementById('directory-section-tabs');
     const bannerContainer = document.getElementById('directory-section-banner');
@@ -597,7 +582,6 @@ function renderDirectory() {
     if (window.lucide) lucide.createIcons();
 }
 
-// Open Student Attendance History Modal
 function openStudentHistory(studentId) {
     const student = students.find(s => s.id === studentId);
     if (!student) return;
@@ -613,7 +597,6 @@ function openStudentHistory(studentId) {
     if (window.lucide) lucide.createIcons();
 }
 
-// FIXED: Calendar month skipping bug resolved by setting date to 1 first
 function changeHistoryMonth(offset) {
     historyCurrentDate.setDate(1);
     historyCurrentDate.setMonth(historyCurrentDate.getMonth() + offset);
@@ -676,7 +659,6 @@ function renderCalendarGrid() {
     `;
 }
 
-// Load Attendance Sheet View
 function loadAttendanceSheet() {
     const dateEl = document.getElementById('att-date');
     const sectionEl = document.getElementById('att-section');
@@ -953,7 +935,6 @@ async function confirmDeleteSection() {
     }
 }
 
-// UPDATED: Now supports both Add and Edit Student functionality
 function openAddStudentModal(studentId = null) {
     if (sections.length === 0) {
         showToast("Please add a section first before adding students.", "error");
@@ -966,19 +947,17 @@ function openAddStudentModal(studentId = null) {
     form.reset();
     
     if (studentId) {
-        // Edit Mode
         modalTitle.innerText = "Edit Student";
         const student = students.find(s => s.id === studentId);
         if (student) {
             document.getElementById('student-edit-id').value = student.id;
             document.getElementById('stud-name').value = student.name;
             document.getElementById('stud-id').value = student.id;
-            document.getElementById('stud-id').disabled = true; // Prevent changing primary key ID
+            document.getElementById('stud-id').disabled = true;
             document.getElementById('stud-section').value = student.section;
             document.getElementById('stud-email').value = student.email || '';
         }
     } else {
-        // Add Mode
         modalTitle.innerText = "Add New Student";
         document.getElementById('student-edit-id').value = "";
         document.getElementById('stud-id').disabled = false;
@@ -1051,7 +1030,6 @@ function closeModal(modalId) {
     if (modal) modal.classList.add('hidden');
 }
 
-// UPDATED: Handles both Insert (New) and Update (Edit) with duplicate validation check
 async function handleStudentSubmit(event) {
     event.preventDefault();
     try {
@@ -1067,7 +1045,6 @@ async function handleStudentSubmit(event) {
 
         let error;
         if (editId) {
-            // Update existing student
             const res = await supabaseClient
                 .from('students')
                 .update({ name, section, email })
@@ -1075,14 +1052,12 @@ async function handleStudentSubmit(event) {
                 .eq('user_id', user.id);
             error = res.error;
         } else {
-            // Check duplicate ID locally first
             const existing = students.find(s => s.id === id);
             if (existing) {
                 showToast("Student ID already exists!", "error");
                 return;
             }
 
-            // Insert new student
             const res = await supabaseClient
                 .from('students')
                 .insert([{ id, name, section, email, user_id: user.id }]);

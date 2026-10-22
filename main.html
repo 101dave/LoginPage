@@ -71,6 +71,9 @@
                 <i data-lucide="calendar-check" style="width: 16px; height: 16px;"></i> Take Attendance
             </button>
             <div class="mob-menu-divider"></div>
+            <button onclick="openProfileModal(); toggleMobileMenu()" class="mob-menu-item">
+                <i data-lucide="user" style="width: 16px; height: 16px;"></i> Profile Settings
+            </button>
             <button onclick="handleLogout()" class="mob-menu-item text-rose">
                 <i data-lucide="log-out" style="width: 16px; height: 16px;"></i> Logout
             </button>
@@ -229,56 +232,84 @@
         </section>
     </main>
 
-    <!-- Modal: Profile Settings & Backup Data -->
+    <!-- Modal: Profile Settings & Data Management (Redesigned UI) -->
     <div id="modal-profile" class="modal-backdrop hidden">
-        <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-content profile-modal-content">
             <div class="modal-header">
-                <h3>Profile Settings</h3>
-                <button onclick="closeModal('modal-profile')" class="close-btn"><i data-lucide="x"></i></button>
+                <div>
+                    <h3>Profile Settings</h3>
+                    <p class="modal-subtext">Manage your personal information and application data backup</p>
+                </div>
+                <button onclick="closeModal('modal-profile')" class="close-btn" aria-label="Close modal">
+                    <i data-lucide="x"></i>
+                </button>
             </div>
-            
-            <form onsubmit="handleProfileSubmit(event)" class="modal-form">
-                <!-- Profile Avatar Preview -->
-                <div class="profile-preview-container">
-                    <div class="profile-preview-avatar" id="modalPreviewAvatar">U</div>
-                </div>
 
-                <div class="input-group">
-                    <label>Display Name</label>
-                    <input type="text" id="profile-display-name" required placeholder="e.g. Teacher Maria" class="form-control">
-                </div>
-
-                <div class="input-group">
-                    <label>Profile Picture</label>
-                    <div class="custom-file-upload">
-                        <label for="profile-image-file" class="file-select-btn">
-                            <i data-lucide="image"></i> <span id="profile-file-name">Select a profile picture...</span>
-                        </label>
-                        <input type="file" id="profile-image-file" accept="image/*" onchange="previewProfileImage(event)">
+            <!-- Scrollable Modal Body -->
+            <div class="profile-modal-body">
+                <!-- Section 1: Profile Information -->
+                <form onsubmit="handleProfileSubmit(event)" class="profile-form-section">
+                    <!-- Avatar Header Box -->
+                    <div class="profile-header-card">
+                        <div class="profile-preview-avatar" id="modalPreviewAvatar">U</div>
+                        <div class="profile-header-info">
+                            <span class="profile-header-title">Profile Picture</span>
+                            <span class="profile-header-desc">PNG, JPG or GIF (Recommended size 1:1)</span>
+                        </div>
                     </div>
-                </div>
 
-                <div style="margin-top: 4px;">
-                    <button type="submit" class="btn btn-primary" style="width: 100%;">
-                        <i data-lucide="save"></i> Save Profile Changes
+                    <div class="input-group">
+                        <label for="profile-display-name">
+                            <i data-lucide="user" style="width: 14px; height: 14px;"></i> Display Name
+                        </label>
+                        <input type="text" id="profile-display-name" required placeholder="e.g. Teacher Maria" class="form-control">
+                    </div>
+
+                    <div class="input-group">
+                        <label>
+                            <i data-lucide="image" style="width: 14px; height: 14px;"></i> Change Picture
+                        </label>
+                        <div class="custom-file-upload">
+                            <label for="profile-image-file" class="file-select-btn">
+                                <i data-lucide="upload-cloud"></i>
+                                <span id="profile-file-name">Select image file...</span>
+                            </label>
+                            <input type="file" id="profile-image-file" accept="image/*" onchange="previewProfileImage(event)" class="sr-only-input">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <i data-lucide="save"></i>
+                        <span>Save Profile Changes</span>
                     </button>
-                </div>
-            </form>
+                </form>
 
-            <div class="profile-section-divider"></div>
+                <div class="profile-section-divider"></div>
 
-            <!-- Backup & Restore Data Section -->
-            <div class="profile-extra-section">
-                <h4><i data-lucide="database" style="width: 16px; height: 16px;"></i> Data Management</h4>
-                <p>Download and backup your file or restore your file.</p>
-                <div class="profile-actions-grid">
-                    <button type="button" onclick="exportDataBackup()" class="btn btn-secondary">
-                        <i data-lucide="download"></i> Backup
-                    </button>
-                    <label class="btn btn-secondary custom-restore-btn">
-                        <i data-lucide="upload"></i> Restore Data
-                        <input type="file" id="importFile" accept=".json" onchange="importDataBackup(event)">
-                    </label>
+                <!-- Section 2: Data Management (Backup & Restore) -->
+                <div class="profile-extra-section">
+                    <div class="extra-section-header">
+                        <div class="extra-icon-box">
+                            <i data-lucide="database"></i>
+                        </div>
+                        <div>
+                            <h4>Data Management</h4>
+                            <p>Export a backup file of your students and attendance logs, or restore from a previously saved JSON backup file.</p>
+                        </div>
+                    </div>
+
+                    <div class="profile-actions-grid">
+                        <button type="button" onclick="exportDataBackup()" class="btn btn-secondary backup-action-btn">
+                            <i data-lucide="download"></i>
+                            <span>Backup Data</span>
+                        </button>
+                        
+                        <label class="btn btn-secondary backup-action-btn custom-restore-btn">
+                            <i data-lucide="upload"></i>
+                            <span>Restore Data</span>
+                            <input type="file" id="importFile" accept=".json" onchange="importDataBackup(event)" class="sr-only-input">
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>
