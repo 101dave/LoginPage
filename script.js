@@ -8,7 +8,7 @@ if (window.supabase) {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-// Check session on load (Huwag mag-auto redirect kung nasa index page para hindi mag-loop)
+// Check session on load (don't auto-redirect away from the index page or it loops)
 document.addEventListener("DOMContentLoaded", async () => {
     if (supabaseClient) {
         const { data: { session } } = await supabaseClient.auth.getSession();
@@ -47,6 +47,17 @@ function showAlert(message, type = "error") {
     alertBox.classList.remove("hidden");
 }
 
+function friendlyAuthError(err) {
+    const msg = (err && err.message) ? err.message : "Something went wrong.";
+    if (/email not confirmed/i.test(msg)) {
+        return "Please confirm your email first — check your inbox for the confirmation link, then sign in.";
+    }
+    if (/invalid login credentials/i.test(msg)) {
+        return "Wrong email or password. Please try again.";
+    }
+    return msg;
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     const email = document.getElementById("loginEmail").value.trim();
@@ -61,7 +72,7 @@ async function handleLogin(e) {
         if (supabaseClient) {
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
-            showAlert("Signed in successfully! Redirecting...", "success");
+            showAlert("Signed in successfully! Loading your data from the cloud...", "success");
             setTimeout(() => { window.location.href = "main.html"; }, 800);
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
@@ -69,7 +80,7 @@ async function handleLogin(e) {
             setTimeout(() => { window.location.href = "main.html"; }, 800);
         }
     } catch (err) {
-        showAlert(err.message || "Failed to sign in.");
+        showAlert(friendlyAuthError(err));
     }
 }
 
@@ -90,16 +101,28 @@ async function handleSignup(e) {
 
     try {
         if (supabaseClient) {
-            const { data, error } = await supabaseClient.auth.signUp({ email, password });
+            const { data, error } = await supabaseClient.auth.signUp({
+                email,
+                password,
+                options: { data: { full_name: email.split("@")[0] } }
+            });
             if (error) throw error;
-            showAlert("Account created! You may now sign in.", "success");
-            setTimeout(() => switchTab("login"), 1500);
+
+            if (data.session) {
+                // Email confirmation is disabled — sign the user straight in
+                showAlert("Account created! Loading your workspace...", "success");
+                setTimeout(() => { window.location.href = "main.html"; }, 800);
+            } else {
+                // Email confirmation required
+                showAlert("Account created! Check your email to confirm your account, then sign in.", "success");
+                setTimeout(() => switchTab("login"), 1800);
+            }
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
             showAlert("Account created locally! Redirecting...", "success");
             setTimeout(() => { window.location.href = "main.html"; }, 1000);
         }
     } catch (err) {
-        showAlert(err.message || "Failed to create account.");
+        showAlert(friendlyAuthError(err));
     }
 }

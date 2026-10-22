@@ -13,12 +13,77 @@ let activeTab = "dashboard";
 let selectedDirectorySection = "ALL";
 let historyStudentId = null;
 let historyCurrentDate = new Date();
+let cloudHasData = false;
 
 let state = {
     sections: [],
     students: [],
     attendance: {}
 };
+
+// --- Helpers ---
+
+// True only for a real Supabase-authenticated user (cloud sync available).
+// The local fallback user ("local-user") must never write to the cloud.
+function cloudReady() {
+    return Boolean(supabaseClient && currentUser && currentUser.id !== "local-user");
+}
+
+// Local-timezone date "YYYY-MM-DD".
+// NOTE: toISOString() is UTC and shifts the date during PH mornings — never use it for "today".
+function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Attendance keys are `${date}_${student_id}` where the date is always 10 chars.
+function parseAttKey(key) {
+    return { date: key.slice(0, 10), studentId: key.slice(11) };
+}
+
+function reportDbError(action, error) {
+    console.error(`Scholog sync error (${action}):`, error);
+    showToast(`Sync failed while ${action}. ${error && error.message ? error.message : "Check your connection."}`, "error");
+}
+
+// Per-account cache key so two accounts on one browser don't mix data.
+function cacheKey() {
+    return (currentUser && currentUser.id && currentUser.id !== "local-user")
+        ? `scholog_app_data_${currentUser.id}`
+        : "scholog_app_data";
+}
+
+function normalizeState(raw) {
+    const sections = Array.isArray(raw.sections)
+        ? [...new Set(raw.sections.map(s => String(s).trim()).filter(Boolean))]
+        : [];
+
+    const seenCodes = new Set();
+    const students = (Array.isArray(raw.students) ? raw.students : [])
+        .map((s, idx) => ({
+            id: s.id != null ? String(s.id) : `s${idx}-${Date.now()}`,
+            student_id: String(s.student_id ?? "").trim(),
+            name: String(s.name ?? "").trim(),
+            email: String(s.email ?? "").trim(),
+            section: String(s.section ?? "").trim()
+        }))
+        .filter(s => {
+            if (!s.student_id || !s.name || seenCodes.has(s.student_id)) return false;
+            seenCodes.add(s.student_id);
+            return true;
+        });
+
+    const attendance = {};
+    const rawAtt = (raw.attendance && typeof raw.attendance === "object") ? raw.attendance : {};
+    Object.keys(rawAtt).forEach(k => {
+        const { date, studentId } = parseAttKey(k);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date) && rawAtt[k]) {
+            attendance[k] = rawAtt[k];
+        }
+    });
+
+    return { sections, students, attendance };
+}
 
 // --- Initialization ---
 document.addEventListener("DOMContentLoaded", async () => {
@@ -35,12 +100,12 @@ async function checkAuth() {
             currentUser = session.user;
             setProfileUI(session.user.email, session.user.user_metadata?.full_name || session.user.email.split("@")[0]);
             await loadSupabaseData();
-        } else {
-            fallbackAuth();
+            await migrateLocalDataToCloud();
+            saveLocalStore(); // cache cloud data locally so the app still opens offline
+            return;
         }
-    } else {
-        fallbackAuth();
     }
+    fallbackAuth();
 }
 
 async function fallbackAuth() {
@@ -56,60 +121,161 @@ async function fallbackAuth() {
 }
 
 function loadLocalStore() {
-    const saved = localStorage.getItem("scholog_app_data");
+    const saved = localStorage.getItem(cacheKey()) || localStorage.getItem("scholog_app_data");
     if (saved) {
-        try { state = JSON.parse(saved); } catch (e) { console.error(e); }
+        try {
+            state = normalizeState(JSON.parse(saved));
+        } catch (e) {
+            console.error("Failed to read local cache:", e);
+        }
     }
 }
 
 function saveLocalStore() {
-    localStorage.setItem("scholog_app_data", JSON.stringify(state));
+    localStorage.setItem(cacheKey(), JSON.stringify(state));
 }
 
 // --- Supabase Data Sync ---
 async function loadSupabaseData() {
-    if (!supabaseClient || !currentUser) return;
+    if (!cloudReady()) return;
 
     try {
-        const { data: secData } = await supabaseClient
+        const { data: secData, error: secErr } = await supabaseClient
             .from("sections")
             .select("*")
-            .eq("user_id", currentUser.id);
-        
-        if (secData) {
-            state.sections = secData.map(s => s.name);
-        }
+            .eq("user_id", currentUser.id)
+            .order("id", { ascending: true });
+        if (secErr) throw secErr;
 
-        const { data: studData } = await supabaseClient
+        const { data: studData, error: studErr } = await supabaseClient
             .from("students")
             .select("*")
-            .eq("user_id", currentUser.id);
-        
-        if (studData) {
-            state.students = studData.map(s => ({
-                id: s.id.toString(),
-                student_id: s.student_id,
-                name: s.name,
-                email: s.email,
-                section: s.section
-            }));
-        }
+            .eq("user_id", currentUser.id)
+            .order("id", { ascending: true });
+        if (studErr) throw studErr;
 
-        const { data: attData } = await supabaseClient
+        const { data: attData, error: attErr } = await supabaseClient
             .from("attendance")
             .select("*")
             .eq("user_id", currentUser.id);
-        
-        if (attData) {
-            state.attendance = {};
-            attData.forEach(row => {
-                const key = `${row.date}_${row.student_id}`;
-                state.attendance[key] = row.status;
-            });
-        }
+        if (attErr) throw attErr;
+
+        state.sections = (secData || []).map(s => s.name);
+        state.students = (studData || []).map(s => ({
+            id: s.id.toString(),
+            student_id: s.student_id,
+            name: s.name,
+            email: s.email,
+            section: s.section
+        }));
+        state.attendance = {};
+        (attData || []).forEach(row => {
+            state.attendance[`${row.date}_${row.student_id}`] = row.status;
+        });
+
+        cloudHasData = state.sections.length > 0
+            || state.students.length > 0
+            || Object.keys(state.attendance).length > 0;
     } catch (err) {
-        console.error("Error loading data from Supabase:", err);
-        loadLocalStore();
+        reportDbError("loading your data", err);
+        loadLocalStore(); // offline fallback: show the last cached copy
+    }
+}
+
+// One-time upload of pre-login localStorage data so it follows the account everywhere.
+async function migrateLocalDataToCloud() {
+    if (!cloudReady() || cloudHasData) return;
+
+    const legacy = localStorage.getItem("scholog_app_data");
+    if (!legacy) return;
+
+    // If the local data clearly belongs to a different signed-in email, leave it alone.
+    const localUserRaw = localStorage.getItem("scholog_local_user");
+    if (localUserRaw && currentUser?.email) {
+        try {
+            const localEmail = JSON.parse(localUserRaw).email;
+            if (localEmail && localEmail.toLowerCase() !== currentUser.email.toLowerCase()) return;
+        } catch (e) { /* ignore malformed */ }
+    }
+
+    try {
+        const parsed = JSON.parse(legacy);
+        const candidate = normalizeState(parsed);
+        const hasAny = candidate.sections.length > 0
+            || candidate.students.length > 0
+            || Object.keys(candidate.attendance).length > 0;
+        if (!hasAny) return;
+
+        state = candidate;
+        await pushFullStateToCloud();
+        localStorage.removeItem("scholog_app_data"); // legacy key consumed
+        showToast("Your saved data was uploaded — it now follows your account on any device.", "success");
+    } catch (err) {
+        reportDbError("uploading your existing data", err);
+    }
+}
+
+// Replace this account's cloud rows with the current state.
+// Used for first-login migration and backup restore (intentional replace semantics).
+async function pushFullStateToCloud() {
+    if (!cloudReady()) throw new Error("Not signed in to the cloud.");
+
+    // Deletion order respects the data dependencies
+    const delAtt = await supabaseClient.from("attendance").delete().eq("user_id", currentUser.id);
+    if (delAtt.error) throw delAtt.error;
+    const delStud = await supabaseClient.from("students").delete().eq("user_id", currentUser.id);
+    if (delStud.error) throw delStud.error;
+    const delSec = await supabaseClient.from("sections").delete().eq("user_id", currentUser.id);
+    if (delSec.error) throw delSec.error;
+
+    if (state.sections.length > 0) {
+        const { error } = await supabaseClient.from("sections").insert(
+            state.sections.map(name => ({ user_id: currentUser.id, name }))
+        );
+        if (error) throw error;
+    }
+
+    if (state.students.length > 0) {
+        const { data, error } = await supabaseClient.from("students").insert(
+            state.students.map(s => ({
+                user_id: currentUser.id,
+                student_id: s.student_id,
+                name: s.name,
+                email: s.email || null,
+                section: s.section
+            }))
+        ).select("id, student_id");
+        if (error) throw error;
+
+        // Remap local ids to the database-generated ones
+        const idByCode = {};
+        (data || []).forEach(r => { idByCode[r.student_id] = String(r.id); });
+        state.students.forEach(s => {
+            if (idByCode[s.student_id]) s.id = idByCode[s.student_id];
+        });
+    }
+
+    const attRows = Object.keys(state.attendance).map(k => {
+        const { date, studentId } = parseAttKey(k);
+        return { user_id: currentUser.id, date, student_id: studentId, status: state.attendance[k] };
+    });
+    for (let i = 0; i < attRows.length; i += 500) {
+        const { error } = await supabaseClient.from("attendance").insert(attRows.slice(i, i + 500));
+        if (error) throw error;
+    }
+}
+
+// Upsert every attendance record (used by the Save button as a safety net).
+async function syncAllAttendance() {
+    const rows = Object.keys(state.attendance).map(k => {
+        const { date, studentId } = parseAttKey(k);
+        return { user_id: currentUser.id, date, student_id: studentId, status: state.attendance[k] };
+    });
+    for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await supabaseClient
+            .from("attendance")
+            .upsert(rows.slice(i, i + 500), { onConflict: "user_id,date,student_id" });
+        if (error) throw error;
     }
 }
 
@@ -126,9 +292,8 @@ function setProfileUI(email, name) {
 }
 
 function initDateInput() {
-    const today = new Date().toISOString().split("T")[0];
     const dateInput = document.getElementById("att-date");
-    if (dateInput) dateInput.value = today;
+    if (dateInput) dateInput.value = todayStr();
 }
 
 function refreshIcons() {
@@ -175,7 +340,7 @@ async function handleLogout() {
 
 // --- Dashboard View ---
 function renderDashboard() {
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayStr();
     document.getElementById("dash-date-label").textContent = `Today (${today})`;
 
     const totalStudents = state.students.length;
@@ -352,16 +517,17 @@ async function setStudentStatus(date, studentId, status) {
     const key = `${date}_${studentId}`;
     state.attendance[key] = status;
     loadAttendanceSheet();
+    saveLocalStore();
 
-    if (supabaseClient && currentUser) {
-        await supabaseClient.from("attendance").upsert({
+    if (cloudReady()) {
+        const { error } = await supabaseClient.from("attendance").upsert({
             user_id: currentUser.id,
             date: date,
             student_id: studentId,
             status: status
-        }, { onConflict: 'user_id,date,student_id' });
+        }, { onConflict: "user_id,date,student_id" });
+        if (error) reportDbError("saving attendance", error);
     }
-    saveLocalStore();
 }
 
 async function markAllAttendance(status) {
@@ -372,7 +538,7 @@ async function markAllAttendance(status) {
     let upsertPayload = [];
     secStudents.forEach(s => {
         state.attendance[`${date}_${s.student_id}`] = status;
-        if (supabaseClient && currentUser) {
+        if (cloudReady()) {
             upsertPayload.push({
                 user_id: currentUser.id,
                 date: date,
@@ -382,18 +548,37 @@ async function markAllAttendance(status) {
         }
     });
 
-    if (supabaseClient && currentUser && upsertPayload.length > 0) {
-        await supabaseClient.from("attendance").upsert(upsertPayload, { onConflict: 'user_id,date,student_id' });
+    saveLocalStore();
+
+    if (cloudReady() && upsertPayload.length > 0) {
+        const { error } = await supabaseClient
+            .from("attendance")
+            .upsert(upsertPayload, { onConflict: "user_id,date,student_id" });
+        if (error) {
+            reportDbError("saving attendance", error);
+            loadAttendanceSheet();
+            return;
+        }
     }
 
-    saveLocalStore();
     loadAttendanceSheet();
     showToast(`Marked all as ${status}`, "success");
 }
 
-function saveAttendance() {
+async function saveAttendance() {
     saveLocalStore();
-    showToast("Attendance records saved!", "success");
+
+    if (!cloudReady()) {
+        showToast("Attendance records saved!", "success");
+        return;
+    }
+
+    try {
+        await syncAllAttendance();
+        showToast("Attendance records saved and synced to the cloud!", "success");
+    } catch (err) {
+        reportDbError("saving attendance", err);
+    }
 }
 
 function exportAttendanceToPDF() {
@@ -435,25 +620,34 @@ function openModal(id) { document.getElementById(id)?.classList.remove("hidden")
 function closeModal(id) { document.getElementById(id)?.classList.add("hidden"); }
 
 function openAddSectionModal() { openModal("modal-section"); }
+
 async function handleSectionSubmit(e) {
     e.preventDefault();
     const name = document.getElementById("new-section-name").value.trim();
-    if (name && !state.sections.includes(name)) {
-        state.sections.push(name);
-        
-        if (supabaseClient && currentUser) {
-            await supabaseClient.from("sections").insert({
-                user_id: currentUser.id,
-                name: name
-            });
-        }
+    if (!name) return;
 
-        saveLocalStore();
-        closeModal("modal-section");
-        document.getElementById("new-section-name").value = "";
-        renderDirectory();
-        showToast("Section added!", "success");
+    if (state.sections.includes(name)) {
+        showToast("That section already exists.", "error");
+        return;
     }
+
+    if (cloudReady()) {
+        const { error } = await supabaseClient.from("sections").insert({
+            user_id: currentUser.id,
+            name: name
+        });
+        if (error) {
+            reportDbError("adding section", error);
+            return;
+        }
+    }
+
+    state.sections.push(name);
+    saveLocalStore();
+    closeModal("modal-section");
+    document.getElementById("new-section-name").value = "";
+    renderDirectory();
+    showToast("Section added!", "success");
 }
 
 function openAddStudentModal() {
@@ -485,33 +679,70 @@ async function handleStudentSubmit(e) {
     const sec = document.getElementById("stud-section").value;
     const email = document.getElementById("stud-email").value.trim();
 
+    // Student codes key the attendance records — they must be unique per account
+    const clash = state.students.find(s => s.student_id === studId && s.id !== editId);
+    if (clash) {
+        showToast(`Student code "${studId}" is already used by ${clash.name}.`, "error");
+        return;
+    }
+
     if (editId) {
         const idx = state.students.findIndex(s => s.id === editId);
-        if (idx !== -1) {
-            state.students[idx] = { id: editId, name, student_id: studId, section: sec, email };
-            if (supabaseClient && currentUser) {
-                await supabaseClient.from("students").update({
-                    student_id: studId,
-                    name: name,
-                    email: email,
-                    section: sec
-                }).eq("id", editId);
+        if (idx === -1) return;
+        const oldCode = state.students[idx].student_id;
+
+        if (cloudReady()) {
+            const { error } = await supabaseClient.from("students").update({
+                student_id: studId,
+                name: name,
+                email: email || null,
+                section: sec
+            }).eq("id", editId);
+            if (error) {
+                reportDbError("updating student", error);
+                return;
+            }
+
+            // Keep attendance history attached when the student code is renamed
+            if (oldCode !== studId) {
+                const { error: attErr } = await supabaseClient
+                    .from("attendance")
+                    .update({ student_id: studId })
+                    .eq("user_id", currentUser.id)
+                    .eq("student_id", oldCode);
+                if (attErr) reportDbError("relinking attendance records", attErr);
             }
         }
+
+        state.students[idx] = { id: editId, name, student_id: studId, section: sec, email };
+
+        if (oldCode !== studId) {
+            const relinked = {};
+            Object.keys(state.attendance).forEach(k => {
+                const { date, studentId } = parseAttKey(k);
+                relinked[`${date}_${studentId === oldCode ? studId : studentId}`] = state.attendance[k];
+            });
+            state.attendance = relinked;
+        }
     } else {
-        const newDbId = Date.now();
-        const newStud = { id: newDbId.toString(), name, student_id: studId, section: sec, email };
-        state.students.push(newStud);
-        if (supabaseClient && currentUser) {
-            await supabaseClient.from("students").insert({
-                id: newDbId,
+        const newStud = { id: Date.now().toString(), name, student_id: studId, section: sec, email };
+
+        if (cloudReady()) {
+            const { data, error } = await supabaseClient.from("students").insert({
                 user_id: currentUser.id,
                 student_id: studId,
                 name: name,
-                email: email,
+                email: email || null,
                 section: sec
-            });
+            }).select("id").single();
+            if (error) {
+                reportDbError("adding student", error);
+                return;
+            }
+            newStud.id = String(data.id); // use the database-generated id
         }
+
+        state.students.push(newStud);
     }
 
     saveLocalStore();
@@ -535,16 +766,21 @@ async function handleTransferSubmit(e) {
     const newSec = document.getElementById("transfer-new-section").value;
 
     const stud = state.students.find(s => s.id === id);
-    if (stud) {
-        stud.section = newSec;
-        if (supabaseClient && currentUser) {
-            await supabaseClient.from("students").update({ section: newSec }).eq("id", id);
+    if (!stud) return;
+
+    if (cloudReady()) {
+        const { error } = await supabaseClient.from("students").update({ section: newSec }).eq("id", id);
+        if (error) {
+            reportDbError("moving student", error);
+            return;
         }
-        saveLocalStore();
-        closeModal("modal-transfer-student");
-        renderDirectory();
-        showToast("Student moved!", "success");
     }
+
+    stud.section = newSec;
+    saveLocalStore();
+    closeModal("modal-transfer-student");
+    renderDirectory();
+    showToast("Student moved!", "success");
 }
 
 function confirmDeleteStudent(id) {
@@ -552,10 +788,28 @@ function confirmDeleteStudent(id) {
     if (!stud) return;
     document.getElementById("delete-student-name").textContent = stud.name;
     document.getElementById("confirm-delete-btn").onclick = async () => {
-        state.students = state.students.filter(s => s.id !== id);
-        if (supabaseClient && currentUser) {
-            await supabaseClient.from("students").delete().eq("id", id);
+        const code = stud.student_id;
+
+        if (cloudReady()) {
+            const { error } = await supabaseClient.from("students").delete().eq("id", id);
+            if (error) {
+                reportDbError("deleting student", error);
+                return;
+            }
+            // Remove the student's attendance history too (local + cloud)
+            const { error: attErr } = await supabaseClient
+                .from("attendance")
+                .delete()
+                .eq("user_id", currentUser.id)
+                .eq("student_id", code);
+            if (attErr) reportDbError("deleting attendance records", attErr);
         }
+
+        state.students = state.students.filter(s => s.id !== id);
+        Object.keys(state.attendance).forEach(k => {
+            if (parseAttKey(k).studentId === code) delete state.attendance[k];
+        });
+
         saveLocalStore();
         closeModal("modal-delete-student");
         renderDirectory();
@@ -567,19 +821,51 @@ function confirmDeleteStudent(id) {
 function confirmDeleteSection(sec) {
     document.getElementById("delete-section-name").textContent = sec;
     document.getElementById("confirm-delete-section-btn").onclick = async () => {
-        state.sections = state.sections.filter(s => s !== sec);
-        state.students = state.students.filter(s => s.section !== sec);
-        selectedDirectorySection = "ALL";
+        const codes = state.students.filter(s => s.section === sec).map(s => s.student_id);
 
-        if (supabaseClient && currentUser) {
-            await supabaseClient.from("sections").delete().eq("name", sec).eq("user_id", currentUser.id);
-            await supabaseClient.from("students").delete().eq("section", sec).eq("user_id", currentUser.id);
+        if (cloudReady()) {
+            if (codes.length > 0) {
+                const { error: attErr } = await supabaseClient
+                    .from("attendance")
+                    .delete()
+                    .eq("user_id", currentUser.id)
+                    .in("student_id", codes);
+                if (attErr) {
+                    reportDbError("deleting attendance records", attErr);
+                    return;
+                }
+            }
+            const { error: studErr } = await supabaseClient
+                .from("students")
+                .delete()
+                .eq("user_id", currentUser.id)
+                .eq("section", sec);
+            if (studErr) {
+                reportDbError("deleting students", studErr);
+                return;
+            }
+            const { error: secErr } = await supabaseClient
+                .from("sections")
+                .delete()
+                .eq("user_id", currentUser.id)
+                .eq("name", sec);
+            if (secErr) {
+                reportDbError("deleting section", secErr);
+                return;
+            }
         }
+
+        state.students = state.students.filter(s => s.section !== sec);
+        Object.keys(state.attendance).forEach(k => {
+            if (codes.includes(parseAttKey(k).studentId)) delete state.attendance[k];
+        });
+        state.sections = state.sections.filter(s => s !== sec);
+        selectedDirectorySection = "ALL";
 
         saveLocalStore();
         closeModal("modal-delete-section");
         renderDirectory();
-        showToast("Section and students deleted", "success");
+        showToast("Section and its records deleted", "success");
     };
     openModal("modal-delete-section");
 }
@@ -664,16 +950,30 @@ function previewProfileImage(e) {
     }
 }
 
-function handleProfileSubmit(e) {
+async function handleProfileSubmit(e) {
     e.preventDefault();
     const newName = document.getElementById("profile-display-name").value.trim();
-    if (newName) {
-        if (currentUser) currentUser.name = newName;
-        localStorage.setItem("scholog_local_user", JSON.stringify({ email: currentUser?.email || "user@scholog.com", name: newName }));
-        setProfileUI(currentUser?.email || "", newName);
-        closeModal("modal-profile");
-        showToast("Profile updated!", "success");
+    if (!newName) return;
+
+    // Store the display name on the account so it follows every device
+    if (cloudReady()) {
+        const { error } = await supabaseClient.auth.updateUser({
+            data: { full_name: newName }
+        });
+        if (error) {
+            reportDbError("updating profile", error);
+            return;
+        }
     }
+
+    if (currentUser) currentUser.name = newName;
+    localStorage.setItem("scholog_local_user", JSON.stringify({
+        email: currentUser?.email || "user@scholog.com",
+        name: newName
+    }));
+    setProfileUI(currentUser?.email || "", newName);
+    closeModal("modal-profile");
+    showToast("Profile updated!", "success");
 }
 
 function exportDataBackup() {
@@ -682,7 +982,7 @@ function exportDataBackup() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Scholog_Backup_${new Date().toISOString().split("T")[0]}.json`;
+    a.download = `Scholog_Backup_${todayStr()}.json`;
     a.click();
     showToast("Backup downloaded!", "success");
 }
@@ -696,11 +996,23 @@ function importDataBackup(e) {
         try {
             const imported = JSON.parse(evt.target.result);
             if (imported.sections && imported.students && imported.attendance) {
-                state = imported;
+                state = normalizeState(imported);
+
+                if (cloudReady()) {
+                    showToast("Restoring backup to your account...", "success");
+                    try {
+                        await pushFullStateToCloud();
+                        showToast("Backup restored and synced to the cloud!", "success");
+                    } catch (err) {
+                        reportDbError("restoring backup", err);
+                    }
+                } else {
+                    showToast("Data restored successfully!", "success");
+                }
+
                 saveLocalStore();
                 closeModal("modal-profile");
                 switchTab(activeTab);
-                showToast("Data restored successfully!", "success");
             } else {
                 throw new Error("Invalid format");
             }
