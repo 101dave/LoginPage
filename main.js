@@ -366,6 +366,11 @@ async function applyCloudOp(op) {
                 user_id: uid, name: op.name
             }, { onConflict: "user_id,name" }));
             break;
+        case "sec^": // rename section and update associated students
+            must(await supabaseClient.from("sections").insert({ user_id: uid, name: op.new_name }));
+            must(await supabaseClient.from("students").update({ section: op.new_name }).eq("user_id", uid).eq("section", op.old_name));
+            must(await supabaseClient.from("sections").delete().eq("user_id", uid).eq("name", op.old_name));
+            break;
         case "sec-": // delete section with its students and attendance
             if (op.codes && op.codes.length > 0) {
                 for (let i = 0; i < op.codes.length; i += 100) {
@@ -611,7 +616,8 @@ function renderDashboard() {
     state.students.forEach(stud => {
         const key = `${today}_${stud.student_id}`;
         const status = state.attendance[key];
-        if (status === "Present") presentToday++;
+        // Kasama na ang "Late" sa bilang ng mga pumasok (Present)
+        if (status === "Present" || status === "Late") presentToday++;
         if (status === "Absent") absentToday++;
     });
 
@@ -634,7 +640,9 @@ function renderDashboard() {
         const secStudents = state.students.filter(s => s.section === sec);
         let secPresent = 0;
         secStudents.forEach(s => {
-            if (state.attendance[`${today}_${s.student_id}`] === "Present") secPresent++;
+            const status = state.attendance[`${today}_${s.student_id}`];
+            // Kasama rin ang "Late" dito sa per-section breakdown
+            if (status === "Present" || status === "Late") secPresent++;
         });
         const secRate = secStudents.length > 0 ? Math.round((secPresent / secStudents.length) * 100) : 0;
 
@@ -690,7 +698,11 @@ function renderDirectory() {
             <h3>${selectedDirectorySection === "ALL" ? "All Sections" : esc(selectedDirectorySection)}</h3>
             <p>Showing active students in selected view</p>
         </div>
-        ${selectedDirectorySection !== "ALL" ? `<button onclick="confirmDeleteSection('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-delete"><i data-lucide="trash-2"></i> Delete Section</button>` : ""}
+        ${selectedDirectorySection !== "ALL" ? `
+            <div style="display: flex; gap: 8px;">
+                <button onclick="openEditSectionModal('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-edit"><i data-lucide="edit-3"></i> Edit Section</button>
+                <button onclick="confirmDeleteSection('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-delete"><i data-lucide="trash-2"></i> Delete Section</button>
+            </div>` : ""}
     `;
 
     const filtered = state.students.filter(s => {
@@ -840,8 +852,6 @@ async function saveAttendance() {
     const date = document.getElementById("att-date")?.value;
     const sec = document.getElementById("att-section")?.value;
 
-    // Commit every student visibly shown on the sheet (defaults to "Present")
-    // so Dashboard, History Calendar, PDF Export, and Cloud Sync all match.
     if (isValidDateStr(date) && sec) {
         state.students.filter(s => s.section === sec).forEach(s => {
             const k = `${date}_${s.student_id}`;
@@ -922,7 +932,59 @@ function exportAttendanceToPDF() {
 function openModal(id) { document.getElementById(id)?.classList.remove("hidden"); }
 function closeModal(id) { document.getElementById(id)?.classList.add("hidden"); }
 
-function openAddSectionModal() { openModal("modal-section"); }
+function openAddSectionModal() {
+    const titleEl = document.querySelector("#modal-section h3");
+    if (titleEl) titleEl.textContent = "Add Section";
+    const formEl = document.querySelector("#modal-section form");
+    if (formEl) formEl.onsubmit = handleSectionSubmit;
+    document.getElementById("new-section-name").value = "";
+    openModal("modal-section");
+}
+
+function openEditSectionModal(oldName) {
+    const titleEl = document.querySelector("#modal-section h3");
+    if (titleEl) titleEl.textContent = "Edit Section";
+    const inputEl = document.getElementById("new-section-name");
+    if (inputEl) inputEl.value = oldName;
+    
+    const formEl = document.querySelector("#modal-section form");
+    if (formEl) {
+        formEl.onsubmit = async (e) => {
+            e.preventDefault();
+            const newName = inputEl.value.trim();
+            if (!newName) return;
+
+            if (newName === oldName) {
+                closeModal("modal-section");
+                return;
+            }
+
+            if (state.sections.includes(newName)) {
+                showToast("That section already exists.", "error");
+                return;
+            }
+
+            const idx = state.sections.indexOf(oldName);
+            if (idx !== -1) state.sections[idx] = newName;
+
+            state.students.forEach(s => {
+                if (s.section === oldName) s.section = newName;
+            });
+
+            if (selectedDirectorySection === oldName) {
+                selectedDirectorySection = newName;
+            }
+
+            saveLocalStore();
+            closeModal("modal-section");
+            renderDirectory();
+            showToast("Section updated!", "success");
+
+            await trySync({ t: "sec^", old_name: oldName, new_name: newName });
+        };
+    }
+    openModal("modal-section");
+}
 
 async function handleSectionSubmit(e) {
     e.preventDefault();
@@ -946,7 +1008,7 @@ async function handleSectionSubmit(e) {
 function openAddStudentModal() {
     if (state.sections.length === 0) {
         showToast("Add a section first (e.g. Grade 11 - STEM), then add students to it.", "error");
-        openModal("modal-section");
+        openAddSectionModal();
         return;
     }
     document.getElementById("student-modal-title").textContent = "Add New Student";
@@ -993,7 +1055,6 @@ async function handleStudentSubmit(e) {
         return;
     }
 
-    // Student codes key the attendance records — they must be unique per account
     const clash = state.students.find(s => s.student_id === studId && s.id !== editId);
     if (clash) {
         showToast(`Student code "${studId}" is already used by ${clash.name}.`, "error");
@@ -1012,7 +1073,6 @@ async function handleStudentSubmit(e) {
         state.students[idx] = { id: editId, name, student_id: studId, section: sec, email };
 
         if (oldCode !== studId) {
-            // Keep attendance history attached when the student code is renamed
             const relinked = {};
             Object.keys(state.attendance).forEach(k => {
                 const { date, studentId } = parseAttKey(k);
@@ -1132,7 +1192,6 @@ function openAttendanceHistory(studentId) {
 }
 
 function changeHistoryMonth(delta) {
-    // Anchor to day 1 so stepping back/forward on the 29th–31st never skips short months
     historyCurrentDate = new Date(
         historyCurrentDate.getFullYear(),
         historyCurrentDate.getMonth() + delta,
@@ -1201,8 +1260,6 @@ function openProfileModal() {
     openModal("modal-profile");
 }
 
-// Compress a selected profile photo onto a small 72x72 canvas (~1.5–2.5 KB)
-// so it stays well within HTTP header / JWT limits and syncs across devices.
 function compressAvatarImage(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -1265,7 +1322,6 @@ async function handleProfileSubmit(e) {
     }
 
     if (!cloudReady()) {
-        // Only write local user record when operating in offline/local-only mode
         localStorage.setItem("scholog_local_user", JSON.stringify({
             email: currentUser?.email || "user@scholog.com",
             name: newName,
@@ -1277,7 +1333,6 @@ async function handleProfileSubmit(e) {
     closeModal("modal-profile");
     showToast("Profile updated!", "success");
 
-    // Store display name and compressed avatar on the account so both follow every device
     await trySync({ t: "prof", full_name: newName, avatar_url: currentAvatar });
 }
 
@@ -1296,7 +1351,7 @@ function exportDataBackup() {
 function importDataBackup(e) {
     const file = e.target.files[0];
     if (!file) return;
-    e.target.value = ""; // allow re-importing the same file later
+    e.target.value = "";
 
     const reader = new FileReader();
     reader.onload = async (evt) => {

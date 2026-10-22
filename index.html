@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scholog — Sign In</title>
+    <title>Scholog — Sign In & Account Management</title>
+    <link rel="icon" type="image/png" href="SchologLogo.png">
     <!-- Supabase JS SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Custom Modern Styles -->
@@ -17,14 +18,14 @@
                 <div class="brand-logo-wrapper">
                     <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img">
                 </div>
-                <h2>Welcome to Scholog</h2>
-                <p>Sign in and manage your class </p>
+                <h2 id="authCardTitle">Welcome to Scholog</h2>
+                <p id="authCardSubtitle">Sign in to manage your class attendance</p>
             </div>
 
             <!-- Tabs Switcher -->
-            <div class="tabs">
-                <button id="loginTab" class="tab active" onclick="switchTab('login')">Sign In</button>
-                <button id="signupTab" class="tab" onclick="switchTab('signup')">Create Account</button>
+            <div id="authTabs" class="tabs">
+                <button id="loginTab" type="button" class="tab active" onclick="switchTab('login')">Sign In</button>
+                <button id="signupTab" type="button" class="tab" onclick="switchTab('signup')">Create Account</button>
             </div>
 
             <div id="alertBox" class="alert hidden"></div>
@@ -36,10 +37,13 @@
                     <input type="email" id="loginEmail" required placeholder="you@example.com" autocomplete="email">
                 </div>
                 <div class="input-group">
-                    <label for="loginPassword">Password</label>
+                    <div class="label-row">
+                        <label for="loginPassword" style="margin-bottom: 0;">Password</label>
+                        <button type="button" id="forgotPasswordLink" class="link-btn" onclick="openForgotPassword()">Forgot password?</button>
+                    </div>
                     <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
                 </div>
-                <button type="submit" class="btn">
+                <button type="submit" id="loginSubmitBtn" class="btn">
                     <span>Sign In</span>
                 </button>
             </form>
@@ -48,15 +52,49 @@
             <form id="signupForm" class="form" onsubmit="handleSignup(event)">
                 <div class="input-group">
                     <label for="signupEmail">Email Address</label>
-                    <input type="email" id="signupEmail" required placeholder="user@example.com" autocomplete="email">
+                    <input type="email" id="signupEmail" required placeholder="you@example.com" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <label for="signupPassword">Password</label>
                     <input type="password" id="signupPassword" required placeholder="At least 6 characters" autocomplete="new-password">
                 </div>
-                <button type="submit" class="btn">
+                <button type="submit" id="signupSubmitBtn" class="btn">
                     <span>Create Account</span>
                 </button>
+            </form>
+
+            <!-- Forgot Password Form -->
+            <form id="forgotForm" class="form" onsubmit="handleForgotPassword(event)">
+                <p class="form-intro">Enter the email address linked to your account and we'll send you a password reset link.</p>
+                <div class="input-group">
+                    <label for="forgotEmail">Email Address</label>
+                    <input type="email" id="forgotEmail" required placeholder="you@example.com" autocomplete="email">
+                </div>
+                <button type="submit" id="forgotSubmitBtn" class="btn">
+                    <span>Send Reset Link</span>
+                </button>
+                <div class="back-row">
+                    <button type="button" class="link-btn" onclick="switchTab('login')">&larr; Back to Sign In</button>
+                </div>
+            </form>
+
+            <!-- Set New Password Form (opened via email recovery link) -->
+            <form id="resetForm" class="form" onsubmit="handleResetPassword(event)">
+                <p class="form-intro">Choose a strong new password for your Scholog account (at least 6 characters).</p>
+                <div class="input-group">
+                    <label for="newPassword">New Password</label>
+                    <input type="password" id="newPassword" required placeholder="At least 6 characters" autocomplete="new-password">
+                </div>
+                <div class="input-group">
+                    <label for="confirmNewPassword">Confirm New Password</label>
+                    <input type="password" id="confirmNewPassword" required placeholder="Re-enter new password" autocomplete="new-password">
+                </div>
+                <button type="submit" id="resetSubmitBtn" class="btn">
+                    <span>Update Password</span>
+                </button>
+                <div class="back-row">
+                    <button type="button" class="link-btn" onclick="cancelResetPassword()">&larr; Cancel &amp; return to Sign In</button>
+                </div>
             </form>
         </div>
     </div>
