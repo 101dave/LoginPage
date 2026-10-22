@@ -1,91 +1,105 @@
-const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
+// Initialize Supabase Client
+const SUPABASE_URL = "https://jwjivkdgzxuaecplkkad.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3aml2a2Rnenh1YWVjcGxra2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2NTU0NzcsImV4cCI6MjEwODIzMTQ3N30.VTFzl7FlP0apBo5ngnclq3eA9aDE-o3I560-XHSiDKg";
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabaseClient = null;
+
+if (window.supabase) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+// Check session on load (Huwag mag-auto redirect kung nasa index page para hindi mag-loop)
+document.addEventListener("DOMContentLoaded", async () => {
+    if (supabaseClient) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session) {
+            window.location.href = "main.html";
+        }
+    }
+});
 
 function switchTab(tab) {
-    const loginTab = document.getElementById('loginTab');
-    const signupTab = document.getElementById('signupTab');
-    const loginForm = document.getElementById('loginForm');
-    const signupForm = document.getElementById('signupForm');
-    hideAlert();
+    const loginTab = document.getElementById("loginTab");
+    const signupTab = document.getElementById("signupTab");
+    const loginForm = document.getElementById("loginForm");
+    const signupForm = document.getElementById("signupForm");
+    const alertBox = document.getElementById("alertBox");
 
-    if (tab === 'login') {
-        loginTab.classList.add('active');
-        signupTab.classList.remove('active');
-        loginForm.classList.add('active');
-        signupForm.classList.remove('active');
+    alertBox.classList.add("hidden");
+
+    if (tab === "login") {
+        loginTab.classList.add("active");
+        signupTab.classList.remove("active");
+        loginForm.classList.add("active");
+        signupForm.classList.remove("active");
     } else {
-        signupTab.classList.add('active');
-        loginTab.classList.remove('active');
-        signupForm.classList.add('active');
-        loginForm.classList.remove('active');
+        signupTab.classList.add("active");
+        loginTab.classList.remove("active");
+        signupForm.classList.add("active");
+        loginForm.classList.remove("active");
     }
 }
 
-function showAlert(message, type) {
-    const alertBox = document.getElementById('alertBox');
-    if (!alertBox) return;
+function showAlert(message, type = "error") {
+    const alertBox = document.getElementById("alertBox");
     alertBox.textContent = message;
     alertBox.className = `alert ${type}`;
+    alertBox.classList.remove("hidden");
 }
 
-function hideAlert() {
-    const alertBox = document.getElementById('alertBox');
-    if (!alertBox) return;
-    alertBox.className = 'alert hidden';
-}
+async function handleLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById("loginEmail").value.trim();
+    const password = document.getElementById("loginPassword").value;
 
-async function handleLogin(event) {
-    event.preventDefault();
-    hideAlert();
+    if (!email || !password) {
+        showAlert("Please enter both email and password.");
+        return;
+    }
 
-    const email = document.getElementById('loginEmail').value;
-    const password = document.getElementById('loginPassword').value;
-
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email,
-        password,
-    });
-
-    if (error) {
-        showAlert('Incorrect email or password. Please try again.', 'error');
-    } else {
-        showAlert('Login successful! Redirecting...', 'success');
-        setTimeout(() => {
-            window.location.href = 'main.html';
-        }, 1000);
+    try {
+        if (supabaseClient) {
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) throw error;
+            showAlert("Signed in successfully! Redirecting...", "success");
+            setTimeout(() => { window.location.href = "main.html"; }, 800);
+        } else {
+            localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
+            showAlert("Signed in locally! Redirecting...", "success");
+            setTimeout(() => { window.location.href = "main.html"; }, 800);
+        }
+    } catch (err) {
+        showAlert(err.message || "Failed to sign in.");
     }
 }
 
-async function handleSignup(event) {
-    event.preventDefault();
-    hideAlert();
+async function handleSignup(e) {
+    e.preventDefault();
+    const email = document.getElementById("signupEmail").value.trim();
+    const password = document.getElementById("signupPassword").value;
 
-    const submitBtn = event.target.querySelector('[type="submit"]') || event.submitter;
-    const email = document.getElementById('signupEmail').value;
-    const password = document.getElementById('signupPassword').value;
+    if (!email || !password) {
+        showAlert("Please fill in all required fields.");
+        return;
+    }
 
-    if (submitBtn) submitBtn.disabled = true;
-    const originalHTML = submitBtn ? submitBtn.innerHTML : '';
-    if (submitBtn) submitBtn.textContent = 'Creating Account...';
+    if (password.length < 6) {
+        showAlert("Password must be at least 6 characters long.");
+        return;
+    }
 
     try {
-        const { data, error } = await supabaseClient.auth.signUp({
-            email,
-            password,
-        });
-
-        if (error) {
-            showAlert(error.message, 'error');
+        if (supabaseClient) {
+            const { data, error } = await supabaseClient.auth.signUp({ email, password });
+            if (error) throw error;
+            showAlert("Account created! You may now sign in.", "success");
+            setTimeout(() => switchTab("login"), 1500);
         } else {
-            showAlert('Signup successful! Please check your email for verification.', 'success');
+            localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
+            showAlert("Account created locally! Redirecting...", "success");
+            setTimeout(() => { window.location.href = "main.html"; }, 1000);
         }
-    } finally {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalHTML;
-            if (window.lucide) lucide.createIcons();
-        }
+    } catch (err) {
+        showAlert(err.message || "Failed to create account.");
     }
 }
