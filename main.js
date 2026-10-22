@@ -5,7 +5,25 @@
 const SUPABASE_URL = 'https://uarburvejxtjvtqawtlt.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcmJ1cnZlanh0anZ0cWF3dGx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2OTg5NzMsImV4cCI6MjEwNzI3NDk3M30.BRFhOet9M0uKf3mvb5zDaQVJ4ihdDyIUxqSgb19ESX8';
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ✅ FIX for GitHub Pages: explicit auth storage + PKCE flow
+// Without this, Edge/Brave Tracking Prevention blocks session on github.io but not on localhost
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: window.localStorage,
+        storageKey: 'scholog-auth-token',
+        flowType: 'pkce'
+    }
+});
+
+// ✅ Helper to detect network/ad-block failures
+function isNetworkBlockError(err) {
+    if (!err) return false;
+    const msg = (err.message || JSON.stringify(err)).toLowerCase();
+    return msg.includes('failed to fetch') || msg.includes('err_connection') || msg.includes('networkerror');
+}
 
 // Application State
 let sections = [];
@@ -269,7 +287,12 @@ async function fetchStudentsFromSupabase() {
 
     } catch (err) {
         console.error("Unexpected error in fetchStudentsFromSupabase:", err);
-        showToast("Failed to synchronize data from cloud.", "error");
+        if (isNetworkBlockError(err)) {
+            showToast("Network blocked: Tracking Prevention / AdBlock is blocking Supabase. Whitelist this site and reload. (Works on localhost because localhost is exempt)", "error");
+            console.warn("[Scholog] Fix: In Edge go to edge://settings/privacy -> Tracking prevention -> Exceptions Add 101dave.github.io. In Brave disable Shields for this site. In uBlock disable for github.io + supabase.co");
+        } else {
+            showToast("Failed to synchronize data from cloud.", "error");
+        }
     }
 }
 
