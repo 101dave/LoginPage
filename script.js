@@ -341,7 +341,7 @@ async function handleForgotPassword(e) {
 
     setSubmitting(e.target, true, "Sending reset link...", "Send Reset Link");
     try {
-        const redirectTo = new URL("/", window.location.origin).href;
+        const redirectTo = new URL("index.html", window.location.href).href;
         const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
         if (error) throw error;
 

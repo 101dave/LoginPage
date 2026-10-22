@@ -43,6 +43,18 @@ window.addEventListener("online", () => {
     }).catch(err => console.error("Auto-sync on reconnect failed:", err));
 });
 
+// Listen for Background Sync trigger from Service Worker (sw.js)
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", (e) => {
+        if (e.data && e.data.type === "SYNC_NOW") {
+            flushPendingOps().then(() => {
+                saveLocalStore();
+                switchTab(activeTab);
+            }).catch(() => {});
+        }
+    });
+}
+
 // --- Safety helpers ---
 
 // Escape text that goes into innerHTML (prevents broken rendering and XSS).
@@ -151,7 +163,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         await checkAuth();
         initDateInput();
         refreshIcons();
-        switchTab("dashboard");
+        const hashTab = window.location.hash.replace(/^#/, "");
+        const startTab = ["dashboard", "directory", "attendance"].includes(hashTab) ? hashTab : "dashboard";
+        switchTab(startTab);
     } catch (err) {
         console.error("Scholog failed to start:", err);
         showToast("Scholog failed to load. Check your connection and refresh the page.", "error");
@@ -301,6 +315,11 @@ function queueOp(op) {
         }
         out.push(op);
         localStorage.setItem(key, JSON.stringify(out));
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.ready.then(reg => {
+                if (reg.sync) return reg.sync.register("scholog-sync");
+            }).catch(() => {});
+        }
     } catch (e) {
         console.error("Could not queue offline change:", e);
     }
@@ -367,7 +386,7 @@ async function applyCloudOp(op) {
             }, { onConflict: "user_id,name" }));
             break;
         case "sec^": // rename section and update associated students
-            must(await supabaseClient.from("sections").insert({ user_id: uid, name: op.new_name }));
+            must(await supabaseClient.from("sections").upsert({ user_id: uid, name: op.new_name }, { onConflict: "user_id,name" }));
             must(await supabaseClient.from("students").update({ section: op.new_name }).eq("user_id", uid).eq("section", op.old_name));
             must(await supabaseClient.from("sections").delete().eq("user_id", uid).eq("name", op.old_name));
             break;
