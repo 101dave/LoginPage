@@ -3,18 +3,23 @@ const SUPABASE_URL = "https://jwjivkdgzxuaecplkkad.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3aml2a2Rnenh1YWVjcGxra2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2NTU0NzcsImV4cCI6MjEwODIzMTQ3N30.VTFzl7FlP0apBo5ngnclq3eA9aDE-o3I560-XHSiDKg";
 
 let supabaseClient = null;
+let authBusy = false;
 
 if (window.supabase) {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-// Check session on load (don't auto-redirect away from the index page or it loops)
+// Check session on load
 document.addEventListener("DOMContentLoaded", async () => {
-    if (supabaseClient) {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        if (session) {
-            window.location.href = "main.html";
+    try {
+        if (supabaseClient) {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                window.location.href = "main.html";
+            }
         }
+    } catch (err) {
+        console.error("Session check failed:", err);
     }
 });
 
@@ -55,11 +60,31 @@ function friendlyAuthError(err) {
     if (/invalid login credentials/i.test(msg)) {
         return "Wrong email or password. Please try again.";
     }
+    if (/already registered|already been registered/i.test(msg)) {
+        return "An account with this email already exists. Please sign in instead.";
+    }
+    if (/rate limit/i.test(msg)) {
+        return "Too many sign-up/sign-in attempts right now. Please wait a minute and try again.";
+    }
+    if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+        return "Cannot reach the server. Please check your internet connection and try again.";
+    }
     return msg;
+}
+
+function setSubmitting(formEl, busy, busyLabel, idleLabel) {
+    authBusy = busy;
+    const btn = formEl ? formEl.querySelector('button[type="submit"]') : null;
+    if (!btn) return;
+    btn.disabled = busy;
+    const span = btn.querySelector("span");
+    if (span) span.textContent = busy ? busyLabel : idleLabel;
 }
 
 async function handleLogin(e) {
     e.preventDefault();
+    if (authBusy) return;
+
     const email = document.getElementById("loginEmail").value.trim();
     const password = document.getElementById("loginPassword").value;
 
@@ -68,24 +93,28 @@ async function handleLogin(e) {
         return;
     }
 
+    setSubmitting(e.target, true, "Signing in...", "Sign In");
     try {
         if (supabaseClient) {
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
             showAlert("Signed in successfully! Loading your data from the cloud...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 800);
+            setTimeout(() => { window.location.href = "main.html"; }, 600);
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
             showAlert("Signed in locally! Redirecting...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 800);
+            setTimeout(() => { window.location.href = "main.html"; }, 600);
         }
     } catch (err) {
+        setSubmitting(e.target, false, "Signing in...", "Sign In");
         showAlert(friendlyAuthError(err));
     }
 }
 
 async function handleSignup(e) {
     e.preventDefault();
+    if (authBusy) return;
+
     const email = document.getElementById("signupEmail").value.trim();
     const password = document.getElementById("signupPassword").value;
 
@@ -99,30 +128,44 @@ async function handleSignup(e) {
         return;
     }
 
+    setSubmitting(e.target, true, "Creating account...", "Create Account");
     try {
         if (supabaseClient) {
+            const redirectUrl = new URL("index.html", window.location.href).href;
             const { data, error } = await supabaseClient.auth.signUp({
                 email,
                 password,
-                options: { data: { full_name: email.split("@")[0] } }
+                options: {
+                    emailRedirectTo: redirectUrl,
+                    data: { full_name: email.split("@")[0] }
+                }
             });
             if (error) throw error;
 
+            // Supabase returns an empty identities array when email already exists and confirmation is active
+            if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+                setSubmitting(e.target, false, "Creating account...", "Create Account");
+                switchTab("login");
+                document.getElementById("loginEmail").value = email;
+                showAlert("An account with this email already exists. Please sign in instead.");
+                return;
+            }
+
             if (data.session) {
-                // Email confirmation is disabled — sign the user straight in
                 showAlert("Account created! Loading your workspace...", "success");
-                setTimeout(() => { window.location.href = "main.html"; }, 800);
+                setTimeout(() => { window.location.href = "main.html"; }, 600);
             } else {
-                // Email confirmation required
+                setSubmitting(e.target, false, "Creating account...", "Create Account");
                 showAlert("Account created! Check your email to confirm your account, then sign in.", "success");
                 setTimeout(() => switchTab("login"), 1800);
             }
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
             showAlert("Account created locally! Redirecting...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 1000);
+            setTimeout(() => { window.location.href = "main.html"; }, 800);
         }
     } catch (err) {
+        setSubmitting(e.target, false, "Creating account...", "Create Account");
         showAlert(friendlyAuthError(err));
     }
 }
