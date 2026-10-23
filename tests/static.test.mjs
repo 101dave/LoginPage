@@ -46,6 +46,25 @@ test("QR scanner lives on its own page, not in the teacher dashboard", () => {
     assert.doesNotMatch(scanHtml, /password/i);
 });
 
+test("QR scanning is student-only and a missing session means no class", () => {
+    const scanHtml = read("scan.html");
+    const scanJs = read("scan.js");
+
+    // No teacher-side camera: scanning belongs to the student page only.
+    assert.doesNotMatch(scanHtml, /host-scan-btn|host-qr-reader|host-stop-scan-btn|host-scan-hint/);
+    assert.doesNotMatch(scanJs, /hostCheckIn|scanTarget/);
+    assert.equal((scanJs.match(/new window\.Html5Qrcode/g) || []).length, 1, "one scanner, student page");
+    assert.match(scanHtml, /Record manually/);
+    assert.match(scanHtml, /for students only/i);
+
+    // No session -> "walang pasok" screen, and the teacher still records by hand.
+    assert.match(scanHtml, /id="view-noclass"/);
+    assert.match(scanJs, /function showNoClass/);
+    assert.match(scanJs, /invalid_session/);
+    assert.match(read("main.html"), /Walang QR session = walang pasok/);
+    assert.match(read("main.html"), /manual records never need a QR session/i);
+});
+
 test("every locally referenced asset exists", () => {
     const dir = (p) => path.resolve(ROOT, p);
     for (const page of PAGES) {
@@ -61,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v4/);
+    assert.match(sw, /scholog-shell-v5/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",

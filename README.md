@@ -12,14 +12,21 @@ Security, cached locally for offline use, and synced automatically when back onl
 | --- | --- |
 | `index.html` | Sign in, create account, forgot password, set new password |
 | `main.html` | Teacher dashboard: dashboard, class list, take attendance, daily PDF |
-| `scan.html` | **Separate** QR / Student ID check-in page (students + teacher host mode) |
+| `scan.html` | **Separate** check-in page: students scan QR / type ID; teachers create and share the session |
 | `privacy.html` | Privacy policy |
 
 ## Taking attendance
 
+> **No QR session = walang pasok.** A QR check-in session is what tells students
+> there is a class to check in for. If the teacher never creates one for a date,
+> students cannot check in at all (the page shows a "Walang pasok · No class today"
+> screen). The teacher can **still record attendance by hand** — manual Present /
+> Absent / Late / Excused + **Save** never needs a QR session.
+
 1. **In class (teacher):** *Take Attendance* → pick a date and section → tap a status
    per student, *All Present*, then **Save**. **Daily PDF** downloads
    `Daily_Attendance_<section>_<date>.pdf` with the roster, statuses and summary.
+   This works with or without a QR session.
 2. **Student self check-in (QR / Student ID):**
    1. Teacher opens **Start QR Check-In** (attendance view) — `scan.html` opens in a new
       tab, already pre-filled with the section and date on screen. The scanner is never
@@ -29,9 +36,9 @@ Security, cached locally for offline use, and synced automatically when back onl
       projects a big full-screen QR for the classroom; **Copy** / **Share** sends the
       link to a group chat. The setup form hides itself once the session exists.
    3. Students open that link/QR on their own devices — **no login needed**. The page
-      has two clear tabs: **Scan QR** (camera starts automatically; after each
-      check-in it re-arms for the next student) and **Type ID** for anyone without a
-      QR card.
+      has two clear tabs: **Scan QR** (camera starts automatically) and **Type ID**
+      for anyone without a QR card. Scanning is **student-only** — the teacher page
+      has no camera.
    4. The ID is validated against that section's class list on the server, then a
       Present record is written for the session date. The result takes over the screen
       with a big confirmation, the student's name and the running count.
@@ -47,7 +54,7 @@ links and JSON payloads.
 | Who | What they see |
 | --- | --- |
 | Student | Class + date + progress, a **"One phone = one check-in"** rule chip, then a **Scan QR / Type ID** switch, auto-starting camera, a big green confirmation that ends the flow, a "Checked in here" chip and a collapsible 3-step help panel |
-| Teacher | A **1-2-3** flow: choose class → share the QR/link → watch the live roster; projection mode, copy/share, refresh, new session and end check-in are always one tap away |
+| Teacher | A **1-2-3** flow: choose class → share the QR/link → watch the live roster; projection mode, copy/share, refresh, new session, end check-in and a **Record manually** shortcut are always one tap away (no teacher-side camera scanning) |
 
 ## Backend
 
@@ -63,8 +70,12 @@ links and JSON payloads.
   (`localStorage`, per browser). The RPC stores `(token, device_id)` in
   `checkin_events` and refuses a *second, different* student from the same phone
   with `device_already_used` (naming the student already checked in). Re-submitting
-  the same student is fine, and teacher/host scans send no `device_id`, so the
-  teacher's own device can still mark the whole class.
+  the same student is fine.
+- A check-in needs a live session: no session, a closed session or an expired
+  session is rejected (`invalid_session` / `session_closed` / `session_expired`).
+  The page turns `invalid_session` into the "Walang pasok · No class today" screen.
+- `checkin_mark` also accepts `device_id = null` (kept for old clients and scripts);
+  the app's own teacher flow never calls it — teachers record in the dashboard.
   (see `supabase/migrations/20261023_qr_checkin_functions.sql`). They are
   `SECURITY DEFINER`, validate the session (open, not expired) and the student ID,
   and are the only thing `anon` can execute — the class list, attendance and sessions
@@ -82,7 +93,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # 50 UI/PDF/static checks (jsdom, no network)
+npm test                  # 53 UI/PDF/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
