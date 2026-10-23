@@ -2,9 +2,9 @@
 //
 // Two modes:
 //   * Student mode  — scan.html?t=<session token>  (no login required; opened on
-//     the student's own phone or any external device)
+//     the student's own phone or any other device)
 //   * Host mode     — scan.html (teacher signed in): creates a check-in session,
-//     shows the QR/link to share, and follows the live roster.
+//     shows the QR/link to share and follows the live roster.
 //
 // Attendance is written through the public checkin_mark() / checkin_session_info()
 // Postgres functions, which validate the session and the Student ID against the
@@ -16,6 +16,9 @@
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3aml2a2Rnenh1YWVjcGxra2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2NTU0NzcsImV4cCI6MjEwODIzMTQ3N30.VTFzl7FlP0apBo5ngnclq3eA9aDE-o3I560-XHSiDKg";
     const HOST_STORAGE_KEY = "scholog_checkin_host";
     const RPC_TIMEOUT_MS = 12000;
+    const DEVICE_KEY = "scholog_device_id";
+    const LOCK_KEY = "scholog_checkin_lock";
+    const RECENT_LIMIT = 5;
 
     const $ = (id) => document.getElementById(id);
 
@@ -34,12 +37,18 @@
         hostSession: null,
         rosterTimer: null,
         infoTimer: null,
+        resumeTimer: null,
         submitting: false,
         lastCode: "",
         lastCodeAt: 0,
         scanner: null,
         scanning: false,
-        scanTarget: null
+        scanTarget: null,
+        studentTab: "scan",
+        autoScanAttempted: false,
+        cameraBlocked: false,
+        deviceLocked: false,
+        recent: []
     };
 
     // ---------------------------------------------------------------- helpers
@@ -49,6 +58,12 @@
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     }
 
+    function isValidDateStr(s) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s || ""))) return false;
+        const d = new Date(`${s}T00:00:00Z`);
+        return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+    }
+
     function isUuid(value) {
         return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || ""));
     }
@@ -56,8 +71,17 @@
     function formatDate(value) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return value || "—";
         const d = new Date(`${value}T00:00:00`);
-        return d.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+        const today = todayStr();
+        if (value === today) return `Today · ${d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
+        return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     }
+
+    function escapeHtml(value) {
+        return String(value == null ? "" : value)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+    function escapeAttr(value) { return escapeHtml(value); }
 
     function showToast(message, type = "success") {
         const container = $("toast-container");
@@ -94,8 +118,10 @@
     function clearTimers() {
         if (state.rosterTimer) clearInterval(state.rosterTimer);
         if (state.infoTimer) clearInterval(state.infoTimer);
+        if (state.resumeTimer) clearTimeout(state.resumeTimer);
         state.rosterTimer = null;
         state.infoTimer = null;
+        state.resumeTimer = null;
     }
 
     function getTokenFromUrl() {
@@ -197,12 +223,70 @@
                 return `That Student ID is not on the class list for ${where}. Double-check the ID and try again.`;
             case "missing_id":
                 return "Please type your Student ID first.";
+            case "device_already_used":
+                return "This phone already checked in another student. Each phone can only check in one student — ask your teacher for help.";
+            case "invalid_device":
+                return "This phone could not be verified. Reload the page and try again, or ask your teacher.";
             default:
                 return "Something went wrong while saving your attendance. Please try again.";
         }
     }
 
     // ----------------------------------------------------------- student mode
+
+    // Two clear tabs (Scan / Type ID) instead of two stacked forms, so students
+    // always know where they are and what to do next.
+    function setStudentTab(tab, options = {}) {
+        const target = tab === "id" ? "id" : "scan";
+        state.studentTab = target;
+
+        const scanTab = $("tab-scan");
+        const idTab = $("tab-id");
+        const scanPanel = $("panel-scan");
+        const idPanel = $("panel-id");
+
+        if (!scanTab || !idTab) return;
+
+        const scanActive = target === "scan";
+        scanTab.classList.toggle("active", scanActive);
+        idTab.classList.toggle("active", !scanActive);
+        scanTab.setAttribute("aria-selected", String(scanActive));
+        idTab.setAttribute("aria-selected", String(!scanActive));
+        scanTab.tabIndex = scanActive ? 0 : -1;
+        idTab.tabIndex = scanActive ? -1 : 0;
+
+        if (scanPanel) scanPanel.classList.toggle("hidden", !scanActive);
+        if (idPanel) idPanel.classList.toggle("hidden", scanActive);
+
+        if (state.deviceLocked) {
+            const lock = readDeviceLock(state.token);
+            if (lock) renderDeviceLock(lock);
+            return;
+        }
+
+        hideResult();
+
+        if (scanActive) {
+            if (state.session && !state.session.closed && !state.session.expired) {
+                if (!options.noCamera) startScanner("student");
+            }
+        } else {
+            stopScanner();
+            const input = $("student-id-input");
+            if (input && !input.disabled) {
+                setTimeout(() => input.focus(), 30);
+            }
+        }
+    }
+
+    // Keep the tabs usable with arrow keys (standard tablist behaviour).
+    function handleTabKeys(event) {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const next = state.studentTab === "scan" ? "id" : "scan";
+        setStudentTab(next);
+        $(next === "scan" ? "tab-scan" : "tab-id").focus();
+    }
 
     async function startStudentMode(rawToken) {
         if (!isUuid(rawToken)) {
@@ -220,11 +304,31 @@
         $("dashboardLink").classList.add("hidden");
         $("signOutBtn").classList.add("hidden");
 
+        setStudentTab("scan", { noCamera: true });
         await refreshStudentSession(true);
+
+        // This phone already checked someone in for this session? Show that.
+        const lock = readDeviceLock(state.token);
+        if (lock && lock.studentId) {
+            renderDeviceLock(lock);
+        } else {
+            maybeAutoStartCamera();
+        }
 
         state.infoTimer = setInterval(() => {
             if (document.visibilityState === "visible") refreshStudentSession(false);
         }, 20000);
+    }
+
+    // Start the camera once, automatically, because most students arrive here to
+    // scan. Browsers that block autoplay/permissions keep the big manual button.
+    function maybeAutoStartCamera() {
+        if (state.autoScanAttempted || state.deviceLocked) return;
+        state.autoScanAttempted = true;
+        if (!cameraSupported() || !state.session) return;
+        if (state.session.closed || state.session.expired) return;
+        if (state.studentTab !== "scan") return;
+        startScanner("student", { auto: true });
     }
 
     async function refreshStudentSession(initial) {
@@ -278,19 +382,22 @@
         else if (expired) hint.textContent = "This check-in link has expired — ask your teacher for a new one.";
         else hint.textContent = "Scan your QR code or type your Student ID below.";
 
-        const form = $("id-form");
         const input = $("student-id-input");
         const submit = $("submitIdBtn");
         const startScan = $("startScanBtn");
-        if (form) {
+        const tabScan = $("tab-scan");
+        const tabId = $("tab-id");
+        if (input) {
             input.disabled = !open;
             submit.disabled = !open;
-            startScan.disabled = !open;
+            if (startScan) startScan.disabled = !open;
+            tabScan.disabled = !open;
+            tabId.disabled = !open;
             if (!open) stopScanner();
         }
     }
 
-    async function submitStudentId(rawCode) {
+    async function submitStudentId(rawCode, options = {}) {
         if (state.submitting) return;
         if (!state.session) {
             showResult("error", "Check-in not ready", "Please wait a moment and try again.");
@@ -302,13 +409,21 @@
             showResult(
                 "error",
                 "Use your Student ID",
-                "That QR code is the class check-in code, not a student ID. Type your Student ID instead."
+                "That QR code is the class check-in code, not a student ID. Type your Student ID instead.",
+                { retryId: true }
             );
             return;
         }
 
         if (state.session.closed || state.session.expired) {
             showResult("error", "Check-in closed", friendlyError(state.session.closed ? "session_closed" : "session_expired"));
+            return;
+        }
+
+        if (state.deviceLocked) {
+            showResult("info", "This phone is already checked in",
+                "Only one check-in per phone is allowed for this session. Ask your teacher if you need help.",
+                { locked: true });
             return;
         }
 
@@ -324,23 +439,54 @@
         submitBtn.disabled = true;
 
         try {
-            const data = await rpc("checkin_mark", { p_token: state.token, p_student_id: code });
+            const body = { p_token: state.token, p_student_id: code };
+            if (state.mode === "student") body.p_device_id = getDeviceId();
+            const data = await rpc("checkin_mark", body);
             if (data && data.ok) {
                 const name = data.student_name || "Student";
                 const detail = data.already_marked
                     ? `${name} (${data.student_id}) was already on the list — attendance confirmed as Present.`
                     : `${name} (${data.student_id}) is marked Present for ${formatDate(state.session.date)}.`;
-                showResult(data.already_marked ? "info" : "success",
-                    data.already_marked ? "Already checked in" : "You're marked Present",
-                    detail);
+
+                addRecent(data.student_name, data.student_id);
+
                 if (typeof data.checked_in === "number" && typeof data.student_count === "number") {
                     state.session.checked_in = data.checked_in;
                     state.session.student_count = data.student_count;
                     renderStudentSession(state.session);
                 }
+
+                // Lock this phone to this student for the rest of the session.
+                writeDeviceLock({
+                    token: state.token,
+                    studentId: data.student_id,
+                    name: data.student_name || "Student",
+                    at: Date.now()
+                });
+                state.deviceLocked = true;
+
+                showResult(data.already_marked ? "info" : "success",
+                    data.already_marked ? "Already checked in" : `${name.split(" ")[0]}, you're Present!`,
+                    detail,
+                    { locked: true });
+
                 $("student-id-input").value = "";
+            } else if (data && data.error === "device_already_used") {
+                const owner = data.device_student_name ? `${data.device_student_name} (${data.device_student_id})` : "another student";
+                state.deviceLocked = true;
+                writeDeviceLock({
+                    token: state.token,
+                    studentId: data.device_student_id || "",
+                    name: data.device_student_name || "Student",
+                    at: Date.now()
+                });
+                showResult("error", "One check-in per phone",
+                    `This phone already checked in ${owner}. Each phone can only mark one student — ask your teacher if this is a mistake.`,
+                    { locked: true });
             } else {
-                showResult("error", "Could not mark attendance", friendlyError(data && data.error, state.session.section));
+                showResult("error", "Could not mark attendance",
+                    friendlyError(data && data.error, state.session.section),
+                    { retryId: (data && data.error) === "not_in_class" });
             }
         } catch (err) {
             console.error("Check-in failed:", err);
@@ -356,10 +502,81 @@
         }
     }
 
-    function showResult(kind, title, text) {
+    // With one check-in per phone the camera no longer re-arms automatically;
+    // the student sees the confirmation and taps Done.
+    function cancelResume() {
+        if (state.resumeTimer) clearTimeout(state.resumeTimer);
+        state.resumeTimer = null;
+        const note = $("result-note");
+        if (note) {
+            note.classList.add("hidden");
+            note.textContent = "";
+        }
+    }
+
+    // --- one phone, one check-in -------------------------------------------
+    // The id only identifies the browser (not the person); the server pairs it
+    // with the session token so a phone can mark exactly one student.
+    function getDeviceId() {
+        try {
+            let id = localStorage.getItem(DEVICE_KEY);
+            if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) {
+                id = (window.crypto && typeof window.crypto.randomUUID === "function")
+                    ? window.crypto.randomUUID()
+                    : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+                localStorage.setItem(DEVICE_KEY, id);
+            }
+            return id;
+        } catch (err) {
+            // Storage blocked (private mode): fall back to a per-load id.
+            state.ephemeralDeviceId = state.ephemeralDeviceId ||
+                `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+            return state.ephemeralDeviceId;
+        }
+    }
+
+    function readDeviceLock(token) {
+        try {
+            const raw = JSON.parse(localStorage.getItem(LOCK_KEY) || "null");
+            if (!raw || !raw.token || raw.token !== token) return null;
+            return raw;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function writeDeviceLock(info) {
+        try { localStorage.setItem(LOCK_KEY, JSON.stringify(info)); } catch (err) { /* ignore */ }
+    }
+
+    function renderDeviceLock(lock) {
+        state.deviceLocked = true;
+        cancelResume();
+        stopScanner();
+        addRecent(lock.name, lock.studentId);
+        showResult("info", "This phone is already checked in",
+            `${lock.name} (${lock.studentId}) was checked in from this phone. Only one check-in per phone is allowed — ask your teacher if you need help.`,
+            { locked: true });
+    }
+
+    function addRecent(name, studentId) {
+        if (!name) return;
+        state.recent.unshift({ name, studentId });
+        state.recent = state.recent.slice(0, RECENT_LIMIT);
+        const box = $("recent");
+        const list = $("recent-list");
+        if (!box || !list) return;
+        box.classList.remove("hidden");
+        list.innerHTML = state.recent
+            .map((item) => `<li title="${escapeAttr(item.studentId)}">${escapeHtml(item.name)}</li>`)
+            .join("");
+    }
+
+    function showResult(kind, title, text, options = {}) {
+        cancelResume();
+
         const box = $("result");
         const icon = $("result-icon");
-        const again = $("result-again");
         box.classList.remove("hidden", "result-error", "result-info");
         if (kind === "error") box.classList.add("result-error");
         if (kind === "info") box.classList.add("result-info");
@@ -371,8 +588,53 @@
 
         $("result-title").textContent = title;
         $("result-text").textContent = text;
-        again.classList.toggle("hidden", kind === "error");
+
+        // Offer the other input method only when the attempt can still succeed.
+        const retryBtn = $("result-retry-id");
+        retryBtn.classList.toggle("hidden", !options.retryId);
+        retryBtn.textContent = state.studentTab === "id" ? "Try again" : "Type my ID instead";
+
+        // A locked phone has nowhere to go back to: the confirmation is the end.
+        const doneBtn = $("result-done");
+        if (doneBtn) doneBtn.classList.toggle("hidden", Boolean(options.locked));
+
+        const note = $("result-note");
+        if (note) {
+            note.classList.toggle("hidden", !options.locked);
+            note.textContent = options.locked
+                ? "One check-in per phone. Ask your teacher if you need to fix this."
+                : "";
+        }
+
+        // Hide the form while the result is showing: one clear message on screen.
+        $("panel-scan").classList.add("hidden");
+        $("panel-id").classList.add("hidden");
+        const segmented = document.querySelector(".segmented");
+        if (segmented) segmented.classList.add("hidden");
+
+        stopScanner();
         box.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    function hideResult() {
+        cancelResume();
+        if (state.deviceLocked) {
+            // A used phone stays locked: show the notice again instead of the form.
+            const lock = readDeviceLock(state.token);
+            renderDeviceLock(lock || { token: state.token, studentId: "", name: "This phone" });
+            return;
+        }
+        const box = $("result");
+        if (box) box.classList.add("hidden");
+        const segmented = document.querySelector(".segmented");
+        if (segmented) segmented.classList.remove("hidden");
+        if (state.studentTab === "scan") {
+            $("panel-scan").classList.remove("hidden");
+            $("panel-id").classList.add("hidden");
+        } else {
+            $("panel-id").classList.remove("hidden");
+            $("panel-scan").classList.add("hidden");
+        }
     }
 
     // --------------------------------------------------------------- scanning
@@ -381,21 +643,40 @@
         return Boolean(window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     }
 
-    async function startScanner(target) {
+    function setScanStageLive(live) {
+        const stage = $("scan-stage");
+        if (stage) stage.classList.toggle("is-live", live);
+        const note = $("scan-live-note");
+        if (note) note.classList.toggle("hidden", !live);
+    }
+
+    async function startScanner(target, options = {}) {
         const isHost = target === "host";
         const hintEl = $(isHost ? "host-scan-hint" : "camera-hint");
         const containerId = isHost ? "host-qr-reader" : "qr-reader";
 
         if (!cameraSupported()) {
-            if (hintEl) hintEl.textContent = "Camera scanning isn't available in this browser. Please type your Student ID instead.";
+            state.cameraBlocked = true;
+            if (hintEl) hintEl.textContent = isHost
+                ? "Camera scanning isn't available in this browser. Type the Student ID in the roster search instead."
+                : "Camera scanning isn't available in this browser. Tap “Type ID” and enter your Student ID.";
+            if (!isHost) setStudentTab("id");
             return;
         }
-        if (state.scanning) return;
+        // A camera that is still warming up has no scanner yet; let the tap
+        // restart it instead of swallowing the click.
+        if (state.scanning && state.scanner) return;
 
-        $(containerId).classList.remove("hidden");
+        const container = $(containerId);
+        if (!container) return;
+        container.classList.remove("hidden");
+
         state.scanTarget = target;
         const scanner = new window.Html5Qrcode(containerId, { verbose: false });
         state.scanner = scanner;
+        // Mark the scanner busy up front: a QR code can decode before start()
+        // resolves, and that check-in stops the camera immediately.
+        state.scanning = true;
 
         try {
             await scanner.start(
@@ -404,24 +685,31 @@
                 (decoded) => handleDecoded(target, decoded),
                 () => { /* per-frame decode misses are normal */ }
             );
-            state.scanning = true;
+            state.cameraBlocked = false;
             $(isHost ? "host-scan-btn" : "startScanBtn").classList.add("hidden");
             $(isHost ? "host-stop-scan-btn" : "stopScanBtn").classList.remove("hidden");
-            if (hintEl) hintEl.textContent = "Camera on — point it at a QR code.";
+            if (hintEl) hintEl.textContent = isHost
+                ? "Camera on — point it at a student's QR code."
+                : "Camera on — hold your QR code steady inside the frame.";
+            if (!isHost) setScanStageLive(true);
         } catch (err) {
             console.error("Camera failed to start:", err);
-            state.scanner = null;
-            state.scanning = false;
+            if (state.scanner === scanner) {
+                state.scanner = null;
+                state.scanning = false;
+            }
+            state.cameraBlocked = true;
             const name = err && err.name;
             let message = "Could not start the camera. Type your Student ID instead.";
-            if (name === "NotAllowedError") message = "Camera permission was blocked. Allow camera access in your browser, or type your Student ID instead.";
-            if (name === "NotFoundError") message = "No camera found on this device. Type your Student ID instead.";
-            if (name === "NotReadableError") message = "The camera is busy in another app. Close it and try again, or type your Student ID.";
-            if (hintEl) hintEl.textContent = message;
+            if (name === "NotAllowedError") message = "Camera access is blocked. Allow it in your browser settings, or tap “Type ID”.";
+            if (name === "NotFoundError") message = "No camera found on this device. Tap “Type ID” to enter your Student ID.";
+            if (name === "NotReadableError") message = "The camera is busy in another app. Close it and try again, or tap “Type ID”.";
+            if (hintEl) hintEl.textContent = isHost ? message : `${message} (Camera unavailable — you can still check in.)`;
             try { scanner.clear(); } catch (e) { /* ignore */ }
-            $(containerId).classList.add("hidden");
+            container.classList.add("hidden");
             $(isHost ? "host-scan-btn" : "startScanBtn").classList.remove("hidden");
             $(isHost ? "host-stop-scan-btn" : "stopScanBtn").classList.add("hidden");
+            if (!isHost) setScanStageLive(false);
         }
     }
 
@@ -444,6 +732,7 @@
         const stopBtn = $(target === "host" ? "host-stop-scan-btn" : "stopScanBtn");
         if (startBtn) startBtn.classList.remove("hidden");
         if (stopBtn) stopBtn.classList.add("hidden");
+        setScanStageLive(false);
     }
 
     async function handleDecoded(target, decoded) {
@@ -451,7 +740,7 @@
         if (target === "host") {
             await hostCheckIn(decoded);
         } else {
-            await submitStudentId(decoded);
+            await submitStudentId(decoded, { cameFromScan: true });
         }
     }
 
@@ -493,15 +782,32 @@
             : (session.user.email || "Teacher").split("@")[0];
         $("host-user").textContent = label;
 
+        if (navigator.share) $("share-link-btn").classList.remove("hidden");
+
         await loadSections();
+        applyUrlPrefill();
 
         const saved = readSavedHostSession();
         if (saved && isUuid(saved)) {
             const resumed = await resumeHostSession(saved);
             if (resumed) return;
         }
-        $("host-empty").classList.remove("hidden");
-        $("host-session").classList.add("hidden");
+    }
+
+    // The dashboard passes the section/date the teacher was already looking at.
+    function applyUrlPrefill() {
+        const params = new URLSearchParams(window.location.search);
+        const section = params.get("section");
+        const date = params.get("date");
+
+        if (section) {
+            const select = $("host-section");
+            const match = [...select.options].find((opt) => opt.value === section);
+            if (match) select.value = section;
+        }
+        if (date && isValidDateStr(date)) {
+            $("host-date").value = date;
+        }
     }
 
     async function loadSections() {
@@ -528,13 +834,6 @@
         }
     }
 
-    function escapeHtml(value) {
-        return String(value == null ? "" : value)
-            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-    }
-    function escapeAttr(value) { return escapeHtml(value); }
-
     async function createSession(event) {
         event.preventDefault();
         if (!state.currentUser) return;
@@ -547,7 +846,7 @@
             $("host-form-hint").textContent = "Choose a section first.";
             return;
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        if (!isValidDateStr(date)) {
             $("host-form-hint").textContent = "Choose a valid date.";
             return;
         }
@@ -575,7 +874,7 @@
             saveHostSession(data.token);
             $("host-form-hint").textContent = "";
             await renderHostSession();
-            showToast("Check-in session created");
+            showToast("Check-in ready — share the QR or link");
         } catch (err) {
             console.error("Could not create check-in session:", err);
             $("host-form-hint").textContent = `Could not create the session: ${err.message || err}.`;
@@ -611,14 +910,19 @@
         const session = state.hostSession;
         if (!session) return;
 
-        $("host-empty").classList.add("hidden");
+        $("host-start-panel").classList.add("hidden");
         $("host-session").classList.remove("hidden");
-        $("host-session").dataset.token = session.token;
 
         const url = buildCheckinUrl(session.token);
-        renderQr(url);
+        renderQr($("session-qr"), url);
+        renderQr($("presentation-qr"), url);
         $("session-link").value = url;
         $("open-link-btn").href = url;
+
+        $("host-session-title").textContent = session.section;
+        $("host-session-sub").textContent = formatDate(session.attendance_date);
+        $("presentation-title").textContent = session.section;
+        $("presentation-sub").textContent = formatDate(session.attendance_date);
 
         const closed = Boolean(session.closed);
         const expired = new Date(session.expires_at).getTime() < Date.now();
@@ -628,6 +932,7 @@
 
         $("close-session-btn").disabled = closed;
         $("host-scan-btn").disabled = closed || expired;
+        $("present-btn").disabled = closed || expired;
 
         await loadRoster();
 
@@ -637,11 +942,11 @@
         }, 5000);
     }
 
-    function renderQr(url) {
-        const container = $("session-qr");
+    function renderQr(container, url) {
+        if (!container) return;
         container.innerHTML = "";
         if (typeof window.qrcode !== "function") {
-            container.textContent = "QR generator unavailable — copy the link below.";
+            container.textContent = "QR generator unavailable — copy the link instead.";
             return;
         }
         try {
@@ -651,7 +956,7 @@
             container.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
         } catch (err) {
             console.error("QR generation failed:", err);
-            container.textContent = "Could not draw the QR code — copy the link below.";
+            container.textContent = "Could not draw the QR code — copy the link instead.";
         }
     }
 
@@ -693,6 +998,7 @@
             $("host-checked").textContent = String(checked);
             $("host-total").textContent = String(list.length);
             $("host-pending").textContent = String(Math.max(list.length - checked, 0));
+            $("presentation-checked").textContent = String(checked);
 
             const roster = $("host-roster");
             if (items.length === 0) {
@@ -710,6 +1016,8 @@
                     </li>`;
                 }).join("");
             }
+
+            $("host-roster-updated").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
         } catch (err) {
             console.error("Could not load roster:", err);
             if (!silent) showToast("Could not refresh the roster", "error");
@@ -760,6 +1068,8 @@
             badge.textContent = "Closed";
             badge.classList.add("badge-closed");
             $("host-scan-btn").disabled = true;
+            $("present-btn").disabled = true;
+            closePresentation();
             showToast("Check-in closed");
         } catch (err) {
             console.error("Could not close session:", err);
@@ -773,11 +1083,68 @@
         clearSavedHostSession();
         if (state.rosterTimer) clearInterval(state.rosterTimer);
         state.rosterTimer = null;
-        $("host-session").classList.add("hidden");
-        $("host-empty").classList.remove("hidden");
-        $("session-qr").innerHTML = "";
-        $("session-link").value = "";
+        closePresentation();
         stopScanner();
+        $("host-session").classList.add("hidden");
+        $("host-start-panel").classList.remove("hidden");
+        $("session-qr").innerHTML = "";
+        $("presentation-qr").innerHTML = "";
+        $("session-link").value = "";
+        $("host-scan-hint").textContent = "";
+    }
+
+    // Fullscreen QR for the classroom projector.
+    function openPresentation() {
+        const overlay = $("presentation");
+        if (!overlay) return;
+        overlay.classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+        const exit = $("presentation-exit");
+        if (exit) exit.focus();
+    }
+
+    function closePresentation() {
+        const overlay = $("presentation");
+        if (!overlay || overlay.classList.contains("hidden")) return;
+        overlay.classList.add("hidden");
+        document.body.style.overflow = "";
+        const btn = $("present-btn");
+        if (btn) btn.focus();
+    }
+
+    async function copyCheckinLink() {
+        const value = $("session-link").value;
+        if (!value) return false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(value);
+            } else {
+                $("session-link").select();
+                document.execCommand("copy");
+            }
+            showToast("Link copied — paste it in your class group chat");
+            return true;
+        } catch (err) {
+            $("session-link").select();
+            showToast("Press Ctrl/Cmd + C to copy the selected link");
+            return false;
+        }
+    }
+
+    async function shareCheckinLink() {
+        const url = $("session-link").value;
+        if (!url) return;
+        const shareData = {
+            title: "Scholog check-in",
+            text: `Check in for ${state.hostSession ? state.hostSession.section : "class"}`,
+            url
+        };
+        try {
+            await navigator.share(shareData);
+        } catch (err) {
+            if (err && err.name === "AbortError") return;
+            copyCheckinLink();
+        }
     }
 
     function saveHostSession(token) {
@@ -808,39 +1175,51 @@
             submitStudentId($("student-id-input").value);
         });
 
+        $("tab-scan").addEventListener("click", () => setStudentTab("scan"));
+        $("tab-id").addEventListener("click", () => setStudentTab("id"));
+        $("tab-scan").addEventListener("keydown", handleTabKeys);
+        $("tab-id").addEventListener("keydown", handleTabKeys);
+
+        $("scan-use-id-btn").addEventListener("click", () => setStudentTab("id"));
+        $("id-use-scan-btn").addEventListener("click", () => setStudentTab("scan"));
+
         $("startScanBtn").addEventListener("click", () => startScanner("student"));
         $("stopScanBtn").addEventListener("click", () => stopScanner());
-        $("result-again").addEventListener("click", () => {
-            $("result").classList.add("hidden");
-            $("student-id-input").focus();
+
+        $("result-retry-id").addEventListener("click", () => setStudentTab("id"));
+        $("result-done").addEventListener("click", () => {
+            hideResult();
+            $("session-hint").scrollIntoView({ behavior: "smooth", block: "start" });
         });
 
         $("session-form").addEventListener("submit", createSession);
         $("host-scan-btn").addEventListener("click", () => startScanner("host"));
-        const stopHostBtn = $("host-stop-scan-btn");
-        if (stopHostBtn) stopHostBtn.addEventListener("click", () => stopScanner());
+        $("host-stop-scan-btn").addEventListener("click", () => stopScanner());
         $("refresh-roster-btn").addEventListener("click", () => {
             loadRoster();
             showToast("Roster refreshed");
         });
         $("close-session-btn").addEventListener("click", closeSession);
         $("new-session-btn").addEventListener("click", newSession);
-        $("copy-link-btn").addEventListener("click", async () => {
-            const value = $("session-link").value;
-            if (!value) return;
-            try {
-                await navigator.clipboard.writeText(value);
-                showToast("Link copied");
-            } catch (err) {
-                $("session-link").select();
-                showToast("Press Ctrl/Cmd + C to copy the selected link");
-            }
-        });
+        $("copy-link-btn").addEventListener("click", copyCheckinLink);
+        $("presentation-copy").addEventListener("click", copyCheckinLink);
+        $("share-link-btn").addEventListener("click", shareCheckinLink);
+        $("present-btn").addEventListener("click", openPresentation);
+        $("presentation-exit").addEventListener("click", closePresentation);
         $("signOutBtn").addEventListener("click", signOut);
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") closePresentation();
+        });
 
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState !== "visible") return;
-            if (state.mode === "student") refreshStudentSession(false);
+            if (state.mode === "student") {
+                refreshStudentSession(false);
+                if (state.studentTab === "scan" && !state.scanning && !state.cameraBlocked && !state.deviceLocked) {
+                    startScanner("student", { auto: true });
+                }
+            }
             if (state.mode === "host" && state.hostSession) loadRoster(true);
         });
     }

@@ -23,8 +23,8 @@
                 </div>
             </a>
             <div class="scan-header-actions">
-                <a href="main.html" class="btn btn-ghost" id="dashboardLink">Dashboard</a>
-                <button type="button" class="btn btn-ghost hidden" id="signOutBtn">Sign out</button>
+                <a href="main.html" class="btn btn-ghost btn-sm" id="dashboardLink">Dashboard</a>
+                <button type="button" class="btn btn-ghost btn-sm hidden" id="signOutBtn">Sign out</button>
             </div>
         </div>
     </header>
@@ -37,71 +37,135 @@
             <p class="muted">Loading check-in…</p>
         </section>
 
-        <!-- Student / kiosk check-in -->
+        <!-- ============ STUDENT CHECK-IN ============ -->
         <section id="view-student" class="hidden">
-            <div class="session-card">
-                <div class="session-card-head">
-                    <div>
-                        <p class="eyebrow">Class check-in</p>
-                        <h2 id="session-section">Section</h2>
-                        <p class="muted" id="session-date">—</p>
+
+            <!-- Class strip: where am I? -->
+            <div class="class-strip">
+                <div class="class-strip-text">
+                    <div class="class-strip-top">
+                        <span class="badge" id="session-state-badge">Open</span>
+                        <span class="class-strip-label">Now checking in</span>
                     </div>
-                    <span class="badge" id="session-state-badge">Open</span>
+                    <h2 id="session-section">Section</h2>
+                    <p class="muted" id="session-date">—</p>
                 </div>
-                <div class="progress-row">
-                    <div class="progress" role="progressbar" aria-label="Students checked in" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="session-progress-bar">
+                <div class="class-strip-progress">
+                    <div class="progress" role="progressbar" aria-label="Students checked in"
+                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="session-progress-bar">
                         <div class="progress-fill" id="session-progress"></div>
                     </div>
                     <span class="progress-label" id="session-count">0 / 0 checked in</span>
                 </div>
-                <p class="hint" id="session-hint">Scan your QR code or type your Student ID below.</p>
+            </div>
+            <p class="hint hint-center" id="session-hint">Scan your QR code or type your Student ID below.</p>
+            <p class="device-rule">One phone = one check-in</p>
+
+            <!-- Mode switch: one clear choice at a time -->
+            <div class="segmented" role="tablist" aria-label="Choose how to check in">
+                <button type="button" id="tab-scan" class="seg-btn active" role="tab"
+                        aria-selected="true" aria-controls="panel-scan">
+                    <span class="seg-icon" aria-hidden="true">▣</span> Scan QR
+                </button>
+                <button type="button" id="tab-id" class="seg-btn" role="tab"
+                        aria-selected="false" aria-controls="panel-id" tabindex="-1">
+                    <span class="seg-icon" aria-hidden="true">⌨</span> Type ID
+                </button>
             </div>
 
-            <div class="panel" id="scan-panel">
-                <div class="panel-head">
-                    <h3><span class="step">1</span> Scan your student QR code</h3>
+            <!-- Panel: scan -->
+            <div id="panel-scan" class="panel panel-scan" role="tabpanel" aria-labelledby="tab-scan">
+                <div class="scan-stage" id="scan-stage">
+                    <div id="qr-reader" class="qr-reader" aria-label="Camera QR scanner"></div>
+
+                    <div class="scan-placeholder" id="scan-placeholder">
+                        <div class="scan-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                                <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                                <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                                <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
+                            </svg>
+                        </div>
+                        <p class="scan-placeholder-title">Camera is off</p>
+                        <p class="scan-placeholder-text">Turn it on and point at your QR code.</p>
+                        <button type="button" class="btn btn-primary btn-lg" id="startScanBtn">Turn on camera</button>
+                    </div>
+
+                    <div class="scan-live-note hidden" id="scan-live-note">Point the camera at your QR code</div>
                 </div>
-                <p class="muted">Point your camera at the QR code on your school ID. Works on phones and tablets.</p>
-                <div id="qr-reader" class="qr-reader" aria-label="Camera QR scanner"></div>
+
+                <p class="hint" id="camera-hint">Tap “Turn on camera”, then hold your QR code steady inside the frame.</p>
+
                 <div class="btn-row">
-                    <button type="button" class="btn btn-primary" id="startScanBtn">Start camera</button>
-                    <button type="button" class="btn btn-secondary hidden" id="stopScanBtn">Stop camera</button>
+                    <button type="button" class="btn btn-secondary hidden" id="stopScanBtn">Turn off camera</button>
+                    <button type="button" class="btn btn-ghost" id="scan-use-id-btn">I don’t have a QR code</button>
                 </div>
-                <p class="hint" id="camera-hint"></p>
             </div>
 
-            <div class="panel">
-                <div class="panel-head">
-                    <h3><span class="step">2</span> No QR code? Type your Student ID</h3>
-                </div>
+            <!-- Panel: typed ID -->
+            <div id="panel-id" class="panel hidden" role="tabpanel" aria-labelledby="tab-id">
+                <h3 class="panel-title">Type your Student ID</h3>
+                <p class="muted">No QR code? Enter the ID printed on your school ID or class list.</p>
                 <form id="id-form" class="id-form" autocomplete="off">
-                    <label for="student-id-input">Student ID</label>
+                    <label for="student-id-input" class="sr-only-label">Student ID</label>
                     <input type="text" id="student-id-input" name="student_id" placeholder="e.g. 2026-0001"
-                           inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="64" required>
-                    <button type="submit" class="btn btn-primary btn-block" id="submitIdBtn">Mark me Present</button>
+                           inputmode="text" autocapitalize="characters" spellcheck="false"
+                           autocomplete="off" maxlength="64" required>
+                    <button type="submit" class="btn btn-primary btn-block btn-lg" id="submitIdBtn">Mark me Present</button>
                 </form>
-                <p class="hint">Your ID is checked against this section's class list before attendance is saved.</p>
+                <p class="hint">Your ID is checked against this section’s class list before attendance is saved.</p>
+                <button type="button" class="btn btn-ghost btn-block" id="id-use-scan-btn">I have a QR code instead</button>
             </div>
 
+            <!-- Result: takes over the screen so the outcome is unmissable -->
             <div id="result" class="result hidden" role="status" aria-live="polite">
                 <div class="result-icon" id="result-icon" aria-hidden="true">✓</div>
                 <h3 id="result-title">Marked present</h3>
                 <p id="result-text"></p>
-                <button type="button" class="btn btn-secondary hidden" id="result-again">Check in another student</button>
+                <div class="result-actions">
+                    <button type="button" class="btn btn-secondary hidden" id="result-retry-id">Try typing my ID</button>
+                    <button type="button" class="btn btn-primary btn-lg" id="result-done">Done</button>
+                </div>
+                <p class="result-note hidden" id="result-note"></p>
             </div>
+
+            <!-- Recent check-ins on this device -->
+            <div class="recent hidden" id="recent">
+                <span class="recent-label">Checked in here</span>
+                <ul class="recent-list" id="recent-list"></ul>
+            </div>
+
+            <details class="help">
+                <summary>How do I check in?</summary>
+                <ol class="help-steps">
+                    <li><strong>Scan</strong> the QR code on your school ID, or tap <strong>Type ID</strong> and enter your Student ID.</li>
+                    <li>Scholog checks your ID against today’s class list.</li>
+                    <li>You’ll see a big green confirmation — that means you’re marked <strong>Present</strong>.</li>
+                </ol>
+                <p class="help-foot"><strong>One phone, one check-in.</strong> Each phone can check in one student per session, so a phone can’t be passed around the room. If you share a phone, ask your teacher to check you in from their device.</p>
+                <p class="help-foot">Something not working? Ask your teacher to open a new check-in, or try the other option (scan / type).</p>
+            </details>
         </section>
 
-        <!-- Teacher host mode (no scanner for students here; this page only) -->
+        <!-- ============ TEACHER HOST ============ -->
         <section id="view-host" class="hidden">
-            <div class="panel">
-                <div class="panel-head">
-                    <h3>Start a QR check-in</h3>
-                    <span class="badge badge-muted" id="host-user">Teacher</span>
+
+            <div class="host-topbar">
+                <div>
+                    <p class="eyebrow">Teacher</p>
+                    <h2>QR check-in</h2>
+                    <p class="muted">Students check themselves in — no login needed.</p>
                 </div>
-                <p class="muted">
-                    Pick the section and date, then share the generated QR or link with your class.
-                    Students scan it on their own phones and mark themselves present — no login needed.
-                </p>
+                <span class="badge badge-muted" id="host-user">Teacher</span>
+            </div>
+
+            <!-- Step 1: create -->
+            <div class="panel" id="host-start-panel">
+                <div class="panel-head">
+                    <h3><span class="step">1</span> Choose a class</h3>
+                </div>
                 <form id="session-form" class="session-form">
                     <div class="field">
                         <label for="host-section">Section</label>
@@ -114,57 +178,88 @@
                     <div class="field">
                         <label for="host-duration">Keep open for</label>
                         <select id="host-duration">
+                            <option value="15">15 minutes</option>
                             <option value="30">30 minutes</option>
                             <option value="60" selected>1 hour</option>
                             <option value="120">2 hours</option>
                         </select>
                     </div>
-                    <button type="submit" class="btn btn-primary btn-block" id="start-session-btn">Create check-in QR</button>
+                    <button type="submit" class="btn btn-primary btn-block btn-lg" id="start-session-btn">Create check-in QR</button>
                 </form>
                 <p class="hint" id="host-form-hint"></p>
+                <p class="hint">Students can check in once per phone. Your own scanner is not limited — you can mark the whole class from this device.</p>
             </div>
 
-            <div class="panel hidden" id="host-session">
-                <div class="panel-head">
-                    <h3>Share this with your class</h3>
-                    <span class="badge" id="host-session-badge">Open</span>
+            <!-- Step 2: share + monitor -->
+            <div id="host-session" class="hidden">
+                <div class="panel session-hero">
+                    <div class="session-hero-head">
+                        <div>
+                            <p class="eyebrow">Scan to check in</p>
+                            <h2 id="host-session-title">Section</h2>
+                            <p class="muted" id="host-session-sub">—</p>
+                        </div>
+                        <span class="badge" id="host-session-badge">Open</span>
+                    </div>
+
+                    <div class="qr-box">
+                        <div id="session-qr" class="qr-canvas" aria-label="Check-in QR code"></div>
+                    </div>
+
+                    <p class="qr-caption">Students scan this with their phone camera — or open the link.</p>
+
+                    <div class="link-row">
+                        <input type="text" id="session-link" readonly aria-label="Check-in link">
+                        <button type="button" class="btn btn-secondary" id="copy-link-btn">Copy</button>
+                        <button type="button" class="btn btn-secondary hidden" id="share-link-btn">Share</button>
+                        <a class="btn btn-secondary" id="open-link-btn" href="#" target="_blank" rel="noopener">Open</a>
+                    </div>
+
+                    <div class="host-stats">
+                        <div class="stat"><span class="stat-value" id="host-checked">0</span><span class="stat-label">Checked in</span></div>
+                        <div class="stat"><span class="stat-value" id="host-total">0</span><span class="stat-label">In section</span></div>
+                        <div class="stat"><span class="stat-value" id="host-pending">0</span><span class="stat-label">Pending</span></div>
+                    </div>
+
+                    <div class="btn-row btn-row-main">
+                        <button type="button" class="btn btn-primary" id="present-btn">Present on screen</button>
+                        <button type="button" class="btn btn-secondary" id="host-scan-btn">Scan a student</button>
+                        <button type="button" class="btn btn-secondary hidden" id="host-stop-scan-btn">Stop camera</button>
+                    </div>
+                    <div class="btn-row btn-row-quiet">
+                        <button type="button" class="btn btn-ghost" id="refresh-roster-btn">Refresh list</button>
+                        <button type="button" class="btn btn-ghost" id="new-session-btn">New session</button>
+                        <button type="button" class="btn btn-ghost text-danger" id="close-session-btn">End check-in</button>
+                    </div>
+
+                    <div id="host-qr-reader" class="qr-reader hidden" aria-label="Teacher camera scanner"></div>
+                    <p class="hint" id="host-scan-hint"></p>
                 </div>
 
-                <div class="qr-box">
-                    <div id="session-qr" class="qr-canvas" aria-label="Check-in QR code"></div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <h3>Live roster</h3>
+                        <span class="muted small" id="host-roster-updated">Updates every few seconds</span>
+                    </div>
+                    <ul class="roster" id="host-roster"></ul>
                 </div>
-
-                <div class="link-row">
-                    <input type="text" id="session-link" readonly aria-label="Check-in link">
-                    <button type="button" class="btn btn-secondary" id="copy-link-btn">Copy</button>
-                    <a class="btn btn-secondary" id="open-link-btn" href="#" target="_blank" rel="noopener">Open</a>
-                </div>
-
-                <div class="host-stats">
-                    <div class="stat"><span class="stat-value" id="host-checked">0</span><span class="stat-label">Checked in</span></div>
-                    <div class="stat"><span class="stat-value" id="host-total">0</span><span class="stat-label">In section</span></div>
-                    <div class="stat"><span class="stat-value" id="host-pending">0</span><span class="stat-label">Pending</span></div>
-                </div>
-
-                <div class="btn-row">
-                    <button type="button" class="btn btn-primary" id="host-scan-btn">Scan a student ID</button>
-                    <button type="button" class="btn btn-secondary hidden" id="host-stop-scan-btn">Stop camera</button>
-                    <button type="button" class="btn btn-secondary" id="refresh-roster-btn">Refresh list</button>
-                    <button type="button" class="btn btn-secondary" id="new-session-btn">New session</button>
-                    <button type="button" class="btn btn-danger" id="close-session-btn">End check-in</button>
-                </div>
-
-                <div id="host-qr-reader" class="qr-reader hidden" aria-label="Teacher camera scanner"></div>
-                <p class="hint" id="host-scan-hint"></p>
-
-                <h4 class="roster-title">Live roster</h4>
-                <ul class="roster" id="host-roster"></ul>
-            </div>
-
-            <div class="panel hidden" id="host-empty">
-                <p class="muted">No check-in session yet. Create one above to get a QR code and link.</p>
             </div>
         </section>
+
+        <!-- Presentation overlay: project the QR for the class -->
+        <div id="presentation" class="presentation hidden" role="dialog" aria-modal="true" aria-label="Projected check-in code">
+            <div class="presentation-inner">
+                <p class="presentation-eyebrow">Scan to mark yourself present</p>
+                <h2 id="presentation-title">Section</h2>
+                <p class="muted" id="presentation-sub">—</p>
+                <div id="presentation-qr" class="qr-canvas presentation-qr" aria-label="Check-in QR code"></div>
+                <p class="presentation-count"><strong id="presentation-checked">0</strong> checked in</p>
+                <div class="presentation-actions">
+                    <button type="button" class="btn btn-primary" id="presentation-copy">Copy link</button>
+                    <button type="button" class="btn btn-secondary" id="presentation-exit">Exit</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Problem / signed-out state -->
         <section id="view-problem" class="hidden">

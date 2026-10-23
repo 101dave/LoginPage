@@ -1,4 +1,4 @@
-const CACHE_NAME = "scholog-shell-v3";
+const CACHE_NAME = "scholog-shell-v4";
 const OFFLINE_FALLBACK = "./index.html";
 const APP_SHELL = [
     "./",

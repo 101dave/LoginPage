@@ -268,11 +268,11 @@ test("QR check-in button opens the separate scanner page", async (t) => {
     };
 
     const btn = [...window.document.querySelectorAll("button")]
-        .find((item) => /Open QR Check-In/.test(item.textContent));
+        .find((item) => /Start QR Check-In/.test(item.textContent));
     assert.ok(btn, "QR check-in button exists in the attendance view");
     click(window, btn);
     assert.equal(opened.length, 1);
-    assert.equal(opened[0].url, "scan.html");
+    assert.match(opened[0].url, /scan\.html(\?|$)/);
     assert.equal(opened[0].target, "_blank");
 
     // The scanner UI itself must not live inside the teacher dashboard.
@@ -283,6 +283,26 @@ test("QR check-in button opens the separate scanner page", async (t) => {
     const scanHtml = fs.readFileSync(path.join(ROOT, "scan.html"), "utf8");
     assert.match(scanHtml, /<title>Scholog — QR Check-In<\/title>/);
     assert.match(scanHtml, /scan\.js/);
+});
+
+test("QR check-in launcher passes the selected section and date", async (t) => {
+    const { window, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const opened = [];
+    window.open = (url) => { opened.push(url); return null; };
+
+    window.switchTab("attendance");
+    await waitFor(() => document.querySelectorAll("#att-table-body tr").length === 3, { label: "rows" });
+    document.getElementById("att-section").value = "Grade 11 - ABM";
+    document.getElementById("att-date").value = todayStr();
+    window.loadAttendanceSheet();
+
+    window.openQrCheckInPage();
+    const url = new URL(opened[0]);
+    assert.equal(url.pathname.split("/").pop(), "scan.html");
+    assert.equal(url.searchParams.get("section"), "Grade 11 - ABM");
+    assert.equal(url.searchParams.get("date"), todayStr());
 });
 
 test("teacher refreshes attendance to pick up student check-ins", async (t) => {
