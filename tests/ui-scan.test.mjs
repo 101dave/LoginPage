@@ -11,6 +11,8 @@ test.beforeEach(() => {
     camera = { callbacks: [], stopped: 0, started: 0, failWith: null };
 });
 
+// Every jsdom window starts with empty storage, so each test gets its own device.
+
 function sessionInfo(overrides = {}) {
     return {
         ok: true,
@@ -153,7 +155,7 @@ test("camera starts automatically on the scan tab so students just point and sca
     assert.match(document.getElementById("camera-hint").textContent, /Camera on/i);
 });
 
-test("a successful check-in shows a big result, remembers it and re-arms the camera", async (t) => {
+test("a successful check-in shows a big result and locks the phone", async (t) => {
     const { window, dom, fetchCalls } = bootScan();
     t.after(() => dom.window.close());
     const document = window.document;
@@ -167,18 +169,107 @@ test("a successful check-in shows a big result, remembers it and re-arms the cam
     // One clear message: the tabs and forms step out of the way.
     assert.equal(document.querySelector(".segmented").classList.contains("hidden"), true);
     assert.equal(document.getElementById("panel-id").classList.contains("hidden"), true);
+    assert.match(document.getElementById("result-note").textContent, /One check-in per phone/i);
 
     // The check-in is remembered for this device.
     assert.equal(document.getElementById("recent").classList.contains("hidden"), false);
     assert.match(document.getElementById("recent-list").textContent, /Ana Santos/);
 
-    // "Scan next student" returns to the scanner and restarts the camera.
-    const startedBefore = camera.started;
-    document.getElementById("result-again").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await waitFor(() => document.getElementById("result").classList.contains("hidden"), { label: "result closed" });
-    await waitFor(() => camera.started > startedBefore, { label: "camera restarted" });
-    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), false);
+    // The phone is locked: the form cannot come back.
+    document.getElementById("result-done").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(document.getElementById("result").classList.contains("hidden"), false, "lock notice stays");
+    assert.match(document.getElementById("result-title").textContent, /already checked in/i);
+    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), true);
     assert.ok(fetchCalls.some((call) => call.fn === "checkin_mark"));
+});
+
+test("a student device sends its id and the lock survives a reload", async (t) => {
+    const first = bootScan();
+    t.after(() => first.dom.window.close());
+    const firstDoc = first.window.document;
+    await waitFor(() => !firstDoc.getElementById("view-student").classList.contains("hidden"));
+
+    firstDoc.getElementById("student-id-input").value = "2026-0002";
+    firstDoc.getElementById("id-form").dispatchEvent(new first.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => first.fetchCalls.some((call) => call.fn === "checkin_mark"), { label: "mark call" });
+    await waitFor(() => first.window.localStorage.getItem("scholog_checkin_lock"), { label: "device lock stored" });
+
+    const mark = first.fetchCalls.find((call) => call.fn === "checkin_mark");
+    assert.ok(mark.body.p_device_id, "device id is sent with the check-in");
+    assert.match(mark.body.p_device_id, /^[A-Za-z0-9-]{8,64}$/);
+
+    const deviceId = mark.body.p_device_id;
+    const lock = JSON.parse(first.window.localStorage.getItem("scholog_checkin_lock"));
+    assert.equal(lock.studentId, "2026-0002");
+    assert.equal(lock.token, TOKEN);
+
+    // Same phone, new page load: the lock is restored before any new check-in.
+    const second = bootScan();
+    t.after(() => second.dom.window.close());
+    second.window.localStorage.setItem("scholog_device_id", deviceId);
+    second.window.localStorage.setItem("scholog_checkin_lock", JSON.stringify(lock));
+
+    const secondDoc = second.window.document;
+    await waitFor(() => secondDoc.getElementById("result-title") &&
+        /already checked in/i.test(secondDoc.getElementById("result-title").textContent), { label: "lock restored" });
+    assert.equal(secondDoc.querySelector(".segmented").classList.contains("hidden"), true);
+    assert.match(secondDoc.getElementById("result-text").textContent, /Ana Santos/);
+});
+
+test("the server block (device already used) is explained clearly", async (t) => {
+    const { window, dom } = bootScan({
+        handler: (fn) => {
+            if (fn === "checkin_session_info") return { data: sessionInfo() };
+            if (fn === "checkin_mark") {
+                return {
+                    data: {
+                        ok: false,
+                        error: "device_already_used",
+                        device_student_name: "Juan Dela Cruz",
+                        device_student_id: "2026-0001"
+                    }
+                };
+            }
+            return { data: {} };
+        }
+    });
+    t.after(() => dom.window.close());
+    const document = window.document;
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+
+    document.getElementById("student-id-input").value = "2026-0002";
+    document.getElementById("id-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => document.getElementById("result").classList.contains("result-error"), { label: "error card" });
+    assert.match(document.getElementById("result-title").textContent, /One check-in per phone/i);
+    assert.match(document.getElementById("result-text").textContent, /Juan Dela Cruz \(2026-0001\)/);
+    assert.match(document.getElementById("result-text").textContent, /ask your teacher/i);
+    assert.equal(document.getElementById("result-retry-id").classList.contains("hidden"), true, "no retry offered");
+});
+
+test("the teacher's own scanner is not device-limited", async (t) => {
+    const { window, dom, fetchCalls } = bootScan({ url: "https://scholog.test/scan.html", session: userSession(), db: defaultDb() });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"));
+    await waitFor(() => document.getElementById("host-section").options.length === 2);
+    document.getElementById("session-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => !document.getElementById("host-session").classList.contains("hidden"));
+
+    document.getElementById("host-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitFor(() => camera.callbacks.length > 0);
+    camera.callbacks[0]("2026-0001");
+    await waitFor(() => fetchCalls.filter((call) => call.fn === "checkin_mark").length === 1);
+
+    await waitFor(() => camera.stopped >= 1, { label: "first scan stopped" });
+    document.getElementById("host-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitFor(() => camera.callbacks.length > 1, { label: "second camera start" });
+    camera.callbacks[1]("2026-0003");
+    await waitFor(() => fetchCalls.filter((call) => call.fn === "checkin_mark").length === 2, { label: "second host scan" });
+
+    const marks = fetchCalls.filter((call) => call.fn === "checkin_mark");
+    assert.ok(marks.every((call) => call.body.p_device_id === undefined), "teacher calls carry no device id");
 });
 
 test("host page opens pre-filled from the dashboard link", async (t) => {

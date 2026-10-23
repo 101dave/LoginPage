@@ -46,7 +46,7 @@ links and JSON payloads.
 
 | Who | What they see |
 | --- | --- |
-| Student | Class + date + progress, then a **Scan QR / Type ID** switch, auto-starting camera, big green confirmation, "Scan next student", a "Checked in here" list, and a collapsible 3-step help panel |
+| Student | Class + date + progress, a **"One phone = one check-in"** rule chip, then a **Scan QR / Type ID** switch, auto-starting camera, a big green confirmation that ends the flow, a "Checked in here" chip and a collapsible 3-step help panel |
 | Teacher | A **1-2-3** flow: choose class → share the QR/link → watch the live roster; projection mode, copy/share, refresh, new session and end check-in are always one tap away |
 
 ## Backend
@@ -57,7 +57,14 @@ links and JSON payloads.
 - Tables: `sections`, `students`, `attendance`, `checkin_sessions`.
 - Attendance is unique per `(user_id, date, student_id, subject)`; the app writes
   `subject = 'General'` and upserts on that exact conflict target.
-- Public check-in RPCs: `checkin_session_info(token)` and `checkin_mark(token, student_id)`
+- Public check-in RPCs: `checkin_session_info(token)` and
+  `checkin_mark(token, student_id, device_id = null)`.
+- **One phone = one check-in.** The student page sends a random `device_id`
+  (`localStorage`, per browser). The RPC stores `(token, device_id)` in
+  `checkin_events` and refuses a *second, different* student from the same phone
+  with `device_already_used` (naming the student already checked in). Re-submitting
+  the same student is fine, and teacher/host scans send no `device_id`, so the
+  teacher's own device can still mark the whole class.
   (see `supabase/migrations/20261023_qr_checkin_functions.sql`). They are
   `SECURITY DEFINER`, validate the session (open, not expired) and the student ID,
   and are the only thing `anon` can execute — the class list, attendance and sessions
@@ -75,7 +82,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # 46 UI/PDF/static checks (jsdom, no network)
+npm test                  # 50 UI/PDF/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 

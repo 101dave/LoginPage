@@ -16,7 +16,8 @@
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3aml2a2Rnenh1YWVjcGxra2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2NTU0NzcsImV4cCI6MjEwODIzMTQ3N30.VTFzl7FlP0apBo5ngnclq3eA9aDE-o3I560-XHSiDKg";
     const HOST_STORAGE_KEY = "scholog_checkin_host";
     const RPC_TIMEOUT_MS = 12000;
-    const RESUME_DELAY_MS = 2500;
+    const DEVICE_KEY = "scholog_device_id";
+    const LOCK_KEY = "scholog_checkin_lock";
     const RECENT_LIMIT = 5;
 
     const $ = (id) => document.getElementById(id);
@@ -46,6 +47,7 @@
         studentTab: "scan",
         autoScanAttempted: false,
         cameraBlocked: false,
+        deviceLocked: false,
         recent: []
     };
 
@@ -221,6 +223,10 @@
                 return `That Student ID is not on the class list for ${where}. Double-check the ID and try again.`;
             case "missing_id":
                 return "Please type your Student ID first.";
+            case "device_already_used":
+                return "This phone already checked in another student. Each phone can only check in one student — ask your teacher for help.";
+            case "invalid_device":
+                return "This phone could not be verified. Reload the page and try again, or ask your teacher.";
             default:
                 return "Something went wrong while saving your attendance. Please try again.";
         }
@@ -251,6 +257,12 @@
 
         if (scanPanel) scanPanel.classList.toggle("hidden", !scanActive);
         if (idPanel) idPanel.classList.toggle("hidden", scanActive);
+
+        if (state.deviceLocked) {
+            const lock = readDeviceLock(state.token);
+            if (lock) renderDeviceLock(lock);
+            return;
+        }
 
         hideResult();
 
@@ -294,7 +306,14 @@
 
         setStudentTab("scan", { noCamera: true });
         await refreshStudentSession(true);
-        maybeAutoStartCamera();
+
+        // This phone already checked someone in for this session? Show that.
+        const lock = readDeviceLock(state.token);
+        if (lock && lock.studentId) {
+            renderDeviceLock(lock);
+        } else {
+            maybeAutoStartCamera();
+        }
 
         state.infoTimer = setInterval(() => {
             if (document.visibilityState === "visible") refreshStudentSession(false);
@@ -304,7 +323,7 @@
     // Start the camera once, automatically, because most students arrive here to
     // scan. Browsers that block autoplay/permissions keep the big manual button.
     function maybeAutoStartCamera() {
-        if (state.autoScanAttempted) return;
+        if (state.autoScanAttempted || state.deviceLocked) return;
         state.autoScanAttempted = true;
         if (!cameraSupported() || !state.session) return;
         if (state.session.closed || state.session.expired) return;
@@ -401,6 +420,13 @@
             return;
         }
 
+        if (state.deviceLocked) {
+            showResult("info", "This phone is already checked in",
+                "Only one check-in per phone is allowed for this session. Ask your teacher if you need help.",
+                { locked: true });
+            return;
+        }
+
         const now = Date.now();
         if (code === state.lastCode && now - state.lastCodeAt < 2500) return;
         state.lastCode = code;
@@ -413,7 +439,9 @@
         submitBtn.disabled = true;
 
         try {
-            const data = await rpc("checkin_mark", { p_token: state.token, p_student_id: code });
+            const body = { p_token: state.token, p_student_id: code };
+            if (state.mode === "student") body.p_device_id = getDeviceId();
+            const data = await rpc("checkin_mark", body);
             if (data && data.ok) {
                 const name = data.student_name || "Student";
                 const detail = data.already_marked
@@ -428,13 +456,33 @@
                     renderStudentSession(state.session);
                 }
 
+                // Lock this phone to this student for the rest of the session.
+                writeDeviceLock({
+                    token: state.token,
+                    studentId: data.student_id,
+                    name: data.student_name || "Student",
+                    at: Date.now()
+                });
+                state.deviceLocked = true;
+
                 showResult(data.already_marked ? "info" : "success",
                     data.already_marked ? "Already checked in" : `${name.split(" ")[0]}, you're Present!`,
                     detail,
-                    { scanNext: options.cameFromScan || state.studentTab === "scan" });
+                    { locked: true });
 
                 $("student-id-input").value = "";
-                scheduleStudentResume();
+            } else if (data && data.error === "device_already_used") {
+                const owner = data.device_student_name ? `${data.device_student_name} (${data.device_student_id})` : "another student";
+                state.deviceLocked = true;
+                writeDeviceLock({
+                    token: state.token,
+                    studentId: data.device_student_id || "",
+                    name: data.device_student_name || "Student",
+                    at: Date.now()
+                });
+                showResult("error", "One check-in per phone",
+                    `This phone already checked in ${owner}. Each phone can only mark one student — ask your teacher if this is a mistake.`,
+                    { locked: true });
             } else {
                 showResult("error", "Could not mark attendance",
                     friendlyError(data && data.error, state.session.section),
@@ -454,37 +502,8 @@
         }
     }
 
-    // After a successful scan the camera re-arms on its own so a queue of
-    // students can keep scanning without anyone pressing buttons.
-    function scheduleStudentResume() {
-        if (state.resumeTimer) clearTimeout(state.resumeTimer);
-        const note = $("result-note");
-        if (!note || state.studentTab !== "scan" || !state.session) return;
-
-        let seconds = Math.round(RESUME_DELAY_MS / 1000);
-        note.classList.remove("hidden");
-        note.textContent = `Camera restarts in ${seconds}s for the next student…`;
-
-        state.resumeTimer = setTimeout(() => {
-            state.resumeTimer = null;
-            if (state.mode !== "student") return;
-            if (!state.session || state.session.closed || state.session.expired) return;
-            setStudentTab("scan");
-        }, RESUME_DELAY_MS);
-
-        // Keep the countdown readable without a second timer.
-        const tick = setInterval(() => {
-            seconds -= 1;
-            if (seconds <= 0 || !state.resumeTimer) {
-                clearInterval(tick);
-                note.classList.add("hidden");
-                note.textContent = "";
-                return;
-            }
-            note.textContent = `Camera restarts in ${seconds}s for the next student…`;
-        }, 1000);
-    }
-
+    // With one check-in per phone the camera no longer re-arms automatically;
+    // the student sees the confirmation and taps Done.
     function cancelResume() {
         if (state.resumeTimer) clearTimeout(state.resumeTimer);
         state.resumeTimer = null;
@@ -493,6 +512,51 @@
             note.classList.add("hidden");
             note.textContent = "";
         }
+    }
+
+    // --- one phone, one check-in -------------------------------------------
+    // The id only identifies the browser (not the person); the server pairs it
+    // with the session token so a phone can mark exactly one student.
+    function getDeviceId() {
+        try {
+            let id = localStorage.getItem(DEVICE_KEY);
+            if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) {
+                id = (window.crypto && typeof window.crypto.randomUUID === "function")
+                    ? window.crypto.randomUUID()
+                    : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+                localStorage.setItem(DEVICE_KEY, id);
+            }
+            return id;
+        } catch (err) {
+            // Storage blocked (private mode): fall back to a per-load id.
+            state.ephemeralDeviceId = state.ephemeralDeviceId ||
+                `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+            return state.ephemeralDeviceId;
+        }
+    }
+
+    function readDeviceLock(token) {
+        try {
+            const raw = JSON.parse(localStorage.getItem(LOCK_KEY) || "null");
+            if (!raw || !raw.token || raw.token !== token) return null;
+            return raw;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function writeDeviceLock(info) {
+        try { localStorage.setItem(LOCK_KEY, JSON.stringify(info)); } catch (err) { /* ignore */ }
+    }
+
+    function renderDeviceLock(lock) {
+        state.deviceLocked = true;
+        cancelResume();
+        stopScanner();
+        addRecent(lock.name, lock.studentId);
+        showResult("info", "This phone is already checked in",
+            `${lock.name} (${lock.studentId}) was checked in from this phone. Only one check-in per phone is allowed — ask your teacher if you need help.`,
+            { locked: true });
     }
 
     function addRecent(name, studentId) {
@@ -525,12 +589,22 @@
         $("result-title").textContent = title;
         $("result-text").textContent = text;
 
-        $("result-again").classList.toggle("hidden", !options.scanNext);
-
-        // Offer the other input method, labelled for where the student already is.
+        // Offer the other input method only when the attempt can still succeed.
         const retryBtn = $("result-retry-id");
         retryBtn.classList.toggle("hidden", !options.retryId);
         retryBtn.textContent = state.studentTab === "id" ? "Try again" : "Type my ID instead";
+
+        // A locked phone has nowhere to go back to: the confirmation is the end.
+        const doneBtn = $("result-done");
+        if (doneBtn) doneBtn.classList.toggle("hidden", Boolean(options.locked));
+
+        const note = $("result-note");
+        if (note) {
+            note.classList.toggle("hidden", !options.locked);
+            note.textContent = options.locked
+                ? "One check-in per phone. Ask your teacher if you need to fix this."
+                : "";
+        }
 
         // Hide the form while the result is showing: one clear message on screen.
         $("panel-scan").classList.add("hidden");
@@ -544,6 +618,12 @@
 
     function hideResult() {
         cancelResume();
+        if (state.deviceLocked) {
+            // A used phone stays locked: show the notice again instead of the form.
+            const lock = readDeviceLock(state.token);
+            renderDeviceLock(lock || { token: state.token, studentId: "", name: "This phone" });
+            return;
+        }
         const box = $("result");
         if (box) box.classList.add("hidden");
         const segmented = document.querySelector(".segmented");
@@ -583,7 +663,9 @@
             if (!isHost) setStudentTab("id");
             return;
         }
-        if (state.scanning) return;
+        // A camera that is still warming up has no scanner yet; let the tap
+        // restart it instead of swallowing the click.
+        if (state.scanning && state.scanner) return;
 
         const container = $(containerId);
         if (!container) return;
@@ -592,6 +674,9 @@
         state.scanTarget = target;
         const scanner = new window.Html5Qrcode(containerId, { verbose: false });
         state.scanner = scanner;
+        // Mark the scanner busy up front: a QR code can decode before start()
+        // resolves, and that check-in stops the camera immediately.
+        state.scanning = true;
 
         try {
             await scanner.start(
@@ -600,7 +685,6 @@
                 (decoded) => handleDecoded(target, decoded),
                 () => { /* per-frame decode misses are normal */ }
             );
-            state.scanning = true;
             state.cameraBlocked = false;
             $(isHost ? "host-scan-btn" : "startScanBtn").classList.add("hidden");
             $(isHost ? "host-stop-scan-btn" : "stopScanBtn").classList.remove("hidden");
@@ -610,8 +694,10 @@
             if (!isHost) setScanStageLive(true);
         } catch (err) {
             console.error("Camera failed to start:", err);
-            state.scanner = null;
-            state.scanning = false;
+            if (state.scanner === scanner) {
+                state.scanner = null;
+                state.scanning = false;
+            }
             state.cameraBlocked = true;
             const name = err && err.name;
             let message = "Could not start the camera. Type your Student ID instead.";
@@ -1100,7 +1186,6 @@
         $("startScanBtn").addEventListener("click", () => startScanner("student"));
         $("stopScanBtn").addEventListener("click", () => stopScanner());
 
-        $("result-again").addEventListener("click", () => setStudentTab("scan"));
         $("result-retry-id").addEventListener("click", () => setStudentTab("id"));
         $("result-done").addEventListener("click", () => {
             hideResult();
@@ -1131,7 +1216,7 @@
             if (document.visibilityState !== "visible") return;
             if (state.mode === "student") {
                 refreshStudentSession(false);
-                if (state.studentTab === "scan" && !state.scanning && !state.cameraBlocked) {
+                if (state.studentTab === "scan" && !state.scanning && !state.cameraBlocked && !state.deviceLocked) {
                     startScanner("student", { auto: true });
                 }
             }

@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Scope:** `101dave/LoginPage` (the Scholog attendance app), branch `arena/f84174e8-loginpage`
 **Live preview:** `npm run serve` → port 8080
-**Test result:** `npm test` → **46 passing, 0 failing** (1 live-network test skipped), plus role-based checks run against the production database.
+**Test result:** `npm test` → **49 passing, 0 failing** (1 live-network test skipped; 50 tests total), plus role-based checks run against the production database.
 
 ---
 
@@ -87,7 +87,7 @@ queued.
 ### 3.4 Third-party CDN dependencies (offline/PDF reliability)
 jsPDF, AutoTable, Supabase, Lucide, QR generation and the camera scanner are now
 vendored in `vendor/` (pinned versions, licenses included), so the app and the PDF
-export also work offline. The service worker cache was bumped (`scholog-shell-v3`)
+export also work offline. The service worker cache was bumped (`scholog-shell-v4`)
 so existing installs receive the new code, and the new files were added to the
 offline shell.
 
@@ -236,9 +236,11 @@ navigation (no behaviour change to the underlying RPCs).
   shows a plain-language message and switches to the typed-ID tab.
 - A successful check-in takes over the screen: big green confirmation with the
   student's first name, an "Already checked in" variant, and the running count.
-- **Scan next student** re-arms the camera (the camera also restarts on its own
-  after ~2.5 s with a visible countdown for queues; typing never auto-restarts).
-- "Checked in here" chips remember the last 5 check-ins on that device, and a
+- The confirmation **ends the flow**: there is no "Scan next student" and the camera
+  does not re-arm, because one phone may only check in one student (see §10).
+- A "One phone = one check-in" chip under the class header, plus a help-panel note
+  explaining what to do if a phone is shared.
+- "Checked in here" chip remembers the student checked in from that device, and a
   collapsible "How do I check in?" explains the 3 steps.
 
 **Teacher page**
@@ -254,4 +256,54 @@ navigation (no behaviour change to the underlying RPCs).
 **Tests added** (7): tab switching/one-thing-at-a-time, automatic camera start,
 result + recent list + camera re-arm, dashboard prefill, projection mode
 open/close/Esc, setup-vs-session panel switching, and the launcher passing the
-selected section/date. Suite is now **46 passing, 0 failing**.
+selected section/date. Suite is now **49 passing, 0 failing**.
+
+## 10. One phone = one check-in
+
+*Requirement: a single phone may not be passed around the class.*
+
+**Server (authoritative).** Migration `supabase/migrations/20261023_single_device_checkin.sql`
+(applied to the production project) adds:
+
+- `checkin_events (id, token, device_id, student_id, created_at)` with
+  `unique (token, device_id)`, RLS enabled, no policies, and
+  `revoke all ... from anon, authenticated` — only the `security definer` RPC touches it.
+- `checkin_mark(p_token uuid, p_student_id text, p_device_id text default null)`,
+  replacing the 2-argument version. Blank/`null` device ids (the teacher's own
+  scanner) keep the old unlimited behaviour.
+
+| Situation | `checkin_mark` result |
+| --- | --- |
+| First check-in from a phone | `{ok:true, …, already_marked:false}` |
+| Same phone, same student again | `{ok:true, …, already_marked:true}` |
+| Same phone, a **different** student | `{ok:false, error:"device_already_used", device_student_name, device_student_id}` |
+| Teacher device (no `p_device_id`) | always `ok`, any number of students |
+
+**Live verification (production project, `SET LOCAL ROLE anon`, temp `__QA__` user, rolled back + user deleted afterwards):**
+
+| Step | Result |
+| --- | --- |
+| `phoneA` → `DEV-1` | `ok:true, checked_in:1` |
+| `phoneA` → `DEV-2` | `ok:false, device_already_used, device_student_name:"QA One"` |
+| `phoneA` → `DEV-1` again | `ok:true, already_marked:true` |
+| `phoneB` → `DEV-2` | `ok:true, checked_in:2` |
+| teacher (`null` device) × 2 | `ok:true` both times |
+| old 2-arg call still works | `ok:true` (default `null`) |
+
+**Client (`scan.js`).**
+- `getDeviceId()` stores a random UUID in `localStorage["scholog_device_id"]`
+  (falls back to a per-load id when storage is blocked).
+- Only the **student** path sends `p_device_id`; `hostCheckIn()` sends nothing.
+- A successful check-in writes `localStorage["scholog_checkin_lock"]`
+  (`{token, studentId, name}`); on reload the page restores the "already checked in"
+  screen instead of the scanner.
+- `device_already_used` shows **"One check-in per phone"** naming the student already
+  checked in, with no retry option; the Scan/Type tabs stay hidden.
+- `friendlyError()` gained `device_already_used` and `invalid_device` copy.
+- Fixed a scanner race found while testing: `state.scanning` is now set *before*
+  awaiting `Html5Qrcode.start()`, so a code decoded during warm-up stops cleanly and
+  the start button stays usable.
+
+**Tests added/updated (`tests/ui-scan.test.mjs`).** Successful check-in locks the
+phone; the device id is sent and the lock survives a reload; the server rejection is
+explained with the other student's name; two teacher scans send no `p_device_id`.

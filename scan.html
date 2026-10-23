@@ -59,6 +59,7 @@
                 </div>
             </div>
             <p class="hint hint-center" id="session-hint">Scan your QR code or type your Student ID below.</p>
+            <p class="device-rule">One phone = one check-in</p>
 
             <!-- Mode switch: one clear choice at a time -->
             <div class="segmented" role="tablist" aria-label="Choose how to check in">
@@ -124,9 +125,8 @@
                 <h3 id="result-title">Marked present</h3>
                 <p id="result-text"></p>
                 <div class="result-actions">
-                    <button type="button" class="btn btn-primary btn-lg hidden" id="result-again">Scan next student</button>
                     <button type="button" class="btn btn-secondary hidden" id="result-retry-id">Try typing my ID</button>
-                    <button type="button" class="btn btn-ghost" id="result-done">Done</button>
+                    <button type="button" class="btn btn-primary btn-lg" id="result-done">Done</button>
                 </div>
                 <p class="result-note hidden" id="result-note"></p>
             </div>
@@ -144,6 +144,7 @@
                     <li>Scholog checks your ID against today’s class list.</li>
                     <li>You’ll see a big green confirmation — that means you’re marked <strong>Present</strong>.</li>
                 </ol>
+                <p class="help-foot"><strong>One phone, one check-in.</strong> Each phone can check in one student per session, so a phone can’t be passed around the room. If you share a phone, ask your teacher to check you in from their device.</p>
                 <p class="help-foot">Something not working? Ask your teacher to open a new check-in, or try the other option (scan / type).</p>
             </details>
         </section>
@@ -186,6 +187,7 @@
                     <button type="submit" class="btn btn-primary btn-block btn-lg" id="start-session-btn">Create check-in QR</button>
                 </form>
                 <p class="hint" id="host-form-hint"></p>
+                <p class="hint">Students can check in once per phone. Your own scanner is not limited — you can mark the whole class from this device.</p>
             </div>
 
             <!-- Step 2: share + monitor -->
