@@ -1,19 +1,29 @@
-const CACHE_NAME = "scholog-shell-v2";
+const CACHE_NAME = "scholog-shell-v3";
 const OFFLINE_FALLBACK = "./index.html";
 const APP_SHELL = [
     "./",
     "./index.html",
     "./main.html",
     "./privacy.html",
+    "./scan.html",
     "./style.css",
     "./main.css",
+    "./scan.css",
     "./script.js",
     "./main.js",
+    "./scan.js",
+    "./pdf.js",
     "./manifest.json",
     "./icon-192.png",
     "./icon-512.png",
     "./icon-maskable-512.png",
-    "./SchologLogo.png"
+    "./SchologLogo.png",
+    "./vendor/supabase.js",
+    "./vendor/lucide.min.js",
+    "./vendor/jspdf.umd.min.js",
+    "./vendor/jspdf.autotable.min.js",
+    "./vendor/qrcode.js",
+    "./vendor/html5-qrcode.min.js"
 ];
 
 self.addEventListener("install", (event) => {

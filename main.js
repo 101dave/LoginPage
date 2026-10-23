@@ -17,6 +17,9 @@ let historyStudentId = null;
 let historyCurrentDate = new Date();
 let cloudHasData = false;
 let flushingOps = false;
+// Bumped whenever attendance is changed locally. Background cloud refreshes
+// compare it so a slow refresh can never overwrite a fresh mark/save.
+let localMutationSeq = 0;
 
 let state = {
     sections: [],
@@ -166,11 +169,32 @@ document.addEventListener("DOMContentLoaded", async () => {
         const hashTab = window.location.hash.replace(/^#/, "");
         const startTab = ["dashboard", "directory", "attendance"].includes(hashTab) ? hashTab : "dashboard";
         switchTab(startTab);
+        startCloudRefreshLoop();
     } catch (err) {
         console.error("Scholog failed to start:", err);
         showToast("Scholog failed to load. Check your connection and refresh the page.", "error");
     }
 });
+
+// Keeps the dashboard / attendance sheet in step with QR check-ins that
+// students save from the separate scan.html page.
+function startCloudRefreshLoop() {
+    if (window.__schologRefreshLoop) return;
+    window.__schologRefreshLoop = true;
+
+    setInterval(() => {
+        if (document.visibilityState !== "visible") return;
+        if (activeTab !== "attendance" && activeTab !== "dashboard") return;
+        if (Date.now() - lastCloudSyncAt < 20000) return;
+        syncLatestFromCloud().catch(() => {});
+    }, 30000);
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "visible") return;
+        if (activeTab !== "attendance" && activeTab !== "dashboard") return;
+        syncLatestFromCloud().catch(() => {});
+    });
+}
 
 async function checkAuth() {
     if (supabaseClient) {
@@ -260,39 +284,50 @@ async function fetchAll(table, userId) {
     return out;
 }
 
+// Read the account's cloud data into a plain snapshot (no side effects).
+async function fetchCloudState() {
+    const [secData, studData, attData] = await Promise.all([
+        fetchAll("sections", currentUser.id),
+        fetchAll("students", currentUser.id),
+        fetchAll("attendance", currentUser.id)
+    ]);
+
+    const sections = secData.map(s => s.name);
+    const students = studData.map(s => ({
+        id: s.id.toString(),
+        student_id: s.student_id,
+        name: s.name,
+        email: s.email,
+        section: s.section
+    }));
+
+    const attendance = {};
+    attData.forEach(row => {
+        attendance[`${row.date}_${row.student_id}`] = row.status;
+    });
+
+    // Ensure every student's section appears in state.sections
+    students.forEach(s => {
+        if (s.section && !sections.includes(s.section)) {
+            sections.push(s.section);
+        }
+    });
+
+    return { sections, students, attendance };
+}
+
+function applyCloudState(snapshot) {
+    state = snapshot;
+    cloudHasData = state.sections.length > 0
+        || state.students.length > 0
+        || Object.keys(state.attendance).length > 0;
+}
+
 async function loadSupabaseData() {
     if (!cloudReady()) return;
 
     try {
-        const [secData, studData, attData] = await Promise.all([
-            fetchAll("sections", currentUser.id),
-            fetchAll("students", currentUser.id),
-            fetchAll("attendance", currentUser.id)
-        ]);
-
-        state.sections = secData.map(s => s.name);
-        state.students = studData.map(s => ({
-            id: s.id.toString(),
-            student_id: s.student_id,
-            name: s.name,
-            email: s.email,
-            section: s.section
-        }));
-        state.attendance = {};
-        attData.forEach(row => {
-            state.attendance[`${row.date}_${row.student_id}`] = row.status;
-        });
-
-        // Ensure every student's section appears in state.sections
-        state.students.forEach(s => {
-            if (s.section && !state.sections.includes(s.section)) {
-                state.sections.push(s.section);
-            }
-        });
-
-        cloudHasData = state.sections.length > 0
-            || state.students.length > 0
-            || Object.keys(state.attendance).length > 0;
+        applyCloudState(await fetchCloudState());
     } catch (err) {
         reportDbError("loading your data", err);
         loadLocalStore(); // offline fallback: show the last cached copy
@@ -343,16 +378,19 @@ async function runWithSessionRetry(op) {
 }
 
 async function trySync(...ops) {
-    if (!cloudReady()) return;
+    if (!cloudReady()) return false;
+    let allApplied = true;
     for (const op of ops) {
         try {
             await runWithSessionRetry(op);
         } catch (err) {
+            allApplied = false;
             console.error("Sync failed, change queued for retry:", op, err);
             queueOp(op);
             showToast("Saved on this device — will sync automatically when you're back online.", "error");
         }
     }
+    return allApplied;
 }
 
 async function applyCloudOp(op) {
@@ -360,13 +398,16 @@ async function applyCloudOp(op) {
     switch (op.t) {
         case "att": // one attendance status
             must(await supabaseClient.from("attendance").upsert({
-                user_id: uid, date: op.date, student_id: op.student_id, status: op.status
-            }, { onConflict: "user_id,date,student_id" }));
+                user_id: uid, date: op.date, student_id: op.student_id,
+                status: op.status, subject: op.subject || "General"
+            }, { onConflict: "user_id,date,student_id,subject" }));
             break;
         case "attB": { // batch attendance statuses
             for (let i = 0; i < op.rows.length; i += 500) {
                 must(await supabaseClient.from("attendance")
-                    .upsert(op.rows.slice(i, i + 500).map(r => ({ user_id: uid, ...r })), { onConflict: "user_id,date,student_id" }));
+                    .upsert(op.rows.slice(i, i + 500).map(r => ({
+                        user_id: uid, subject: "General", ...r
+                    })), { onConflict: "user_id,date,student_id,subject" }));
             }
             break;
         }
@@ -602,6 +643,7 @@ function switchTab(tabName) {
     if (tabName === "attendance") {
         populateSectionDropdowns();
         loadAttendanceSheet();
+        syncLatestFromCloud().catch(() => {});
     }
     refreshIcons();
 }
@@ -620,6 +662,8 @@ async function handleLogout() {
         console.error("Sign-out error:", err);
     }
     localStorage.removeItem("scholog_local_user");
+    // Don't leave a resumable QR check-in session behind on a shared device.
+    localStorage.removeItem("scholog_checkin_host");
     window.location.href = "index.html";
 }
 
@@ -752,6 +796,7 @@ function renderDirectory() {
             <td>${esc(stud.email || "N/A")}</td>
             <td class="text-right">
                 <button onclick="openAttendanceHistory('${jsArg(stud.id)}')" class="action-link action-history">History</button>
+                <button onclick="openStudentQr('${jsArg(stud.id)}')" class="action-link action-qr">QR</button>
                 <button onclick="openEditStudentModal('${jsArg(stud.id)}')" class="action-link action-edit">Edit</button>
                 <button onclick="openTransferModal('${jsArg(stud.id)}')" class="action-link action-move">Move</button>
                 <button onclick="confirmDeleteStudent('${jsArg(stud.id)}')" class="action-link action-delete">Delete</button>
@@ -834,6 +879,7 @@ async function setStudentStatus(date, studentId, status) {
     if (!isValidDateStr(date) || !studentId) return;
     const key = `${date}_${studentId}`;
     state.attendance[key] = status;
+    localMutationSeq++;
     loadAttendanceSheet();
     saveLocalStore();
     await trySync({ t: "att", date, student_id: studentId, status });
@@ -859,6 +905,7 @@ async function markAllAttendance(status) {
         rows.push({ date, student_id: s.student_id, status });
     });
 
+    localMutationSeq++;
     saveLocalStore();
     loadAttendanceSheet();
 
@@ -871,41 +918,64 @@ async function saveAttendance() {
     const date = document.getElementById("att-date")?.value;
     const sec = document.getElementById("att-section")?.value;
 
-    if (isValidDateStr(date) && sec) {
-        state.students.filter(s => s.section === sec).forEach(s => {
-            const k = `${date}_${s.student_id}`;
-            if (!state.attendance[k]) {
-                state.attendance[k] = "Present";
-            }
-        });
+    if (!sec) {
+        showToast("Please create and select a section first.", "error");
+        return;
+    }
+    if (!isValidDateStr(date)) {
+        showToast("Please select a valid date before saving.", "error");
+        return;
     }
 
+    const secStudents = state.students.filter(s => s.section === sec);
+    if (secStudents.length === 0) {
+        showToast("No students in this section to save.", "error");
+        return;
+    }
+
+    // Default anyone untouched in the sheet to Present, then save the whole
+    // selected day/section (not every historical row) in one batch.
+    const rows = secStudents.map(stud => {
+        const key = `${date}_${stud.student_id}`;
+        if (!state.attendance[key]) state.attendance[key] = "Present";
+        return { date, student_id: stud.student_id, status: state.attendance[key] };
+    });
+
+    localMutationSeq++;
     saveLocalStore();
+    loadAttendanceSheet();
 
     if (!cloudReady()) {
-        showToast("Attendance records saved!", "success");
+        showToast("Attendance saved on this device (offline).", "success");
         return;
     }
 
     try {
         await flushPendingOps();
-        const rows = Object.keys(state.attendance).map(k => {
-            const { date: d, studentId } = parseAttKey(k);
-            return { date: d, student_id: studentId, status: state.attendance[k] };
-        });
-        if (rows.length > 0) {
-            await runWithSessionRetry({ t: "attB", rows });
-        }
-        showToast("Attendance records saved and synced to the cloud!", "success");
+        await runWithSessionRetry({ t: "attB", rows });
+        showToast(`Attendance saved and synced to the cloud (${rows.length} students).`, "success");
     } catch (err) {
-        reportDbError("saving attendance", err);
+        console.error("Saving attendance failed:", err);
+        queueOp({ t: "attB", rows });
+        showToast("Saved on this device — it will sync automatically when you're back online.", "error");
     }
+}
+
+function currentTeacherLabel() {
+    if (!currentUser) return "";
+    const meta = currentUser.user_metadata || {};
+    if (meta.full_name) return meta.full_name;
+    return (currentUser.email || "").split("@")[0];
 }
 
 function exportAttendanceToPDF() {
     const jsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!jsPDF) {
         showToast("PDF library is unavailable. Please refresh the page.", "error");
+        return;
+    }
+    if (!window.SchologPdf) {
+        showToast("PDF helper is unavailable. Please refresh the page.", "error");
         return;
     }
 
@@ -916,35 +986,76 @@ function exportAttendanceToPDF() {
         return;
     }
 
-    const doc = new jsPDF();
-    if (typeof doc.autoTable !== "function") {
-        showToast("PDF table plugin is unavailable. Please refresh the page.", "error");
+    const secStudents = state.students.filter(s => s.section === sec);
+    if (secStudents.length === 0) {
+        showToast("There are no students in this section to export.", "error");
         return;
     }
 
-    const secStudents = state.students.filter(s => s.section === sec);
+    try {
+        const doc = new jsPDF();
+        const result = window.SchologPdf.buildDailyAttendancePdf(doc, {
+            section: sec,
+            date,
+            students: secStudents,
+            attendance: state.attendance,
+            generatedAt: new Date(),
+            teacher: currentTeacherLabel()
+        });
+        doc.save(result.filename);
+        showToast(`Daily PDF exported (${secStudents.length} students).`, "success");
+    } catch (err) {
+        console.error("Daily PDF export failed:", err);
+        showToast(err && err.message ? err.message : "Could not build the daily PDF.", "error");
+    }
+}
 
-    doc.setFontSize(16);
-    doc.text(`Scholog Attendance Report - ${sec}`, 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Date: ${date}`, 14, 28);
+// --- Cloud refresh (picks up QR / Student-ID check-ins saved by students) ---
+let lastCloudSyncAt = 0;
 
-    const rows = secStudents.map((stud, idx) => [
-        idx + 1,
-        stud.name,
-        stud.student_id,
-        state.attendance[`${date}_${stud.student_id}`] || "Present"
-    ]);
+function openQrCheckInPage() {
+    window.open("scan.html", "_blank", "noopener");
+}
 
-    doc.autoTable({
-        startY: 34,
-        head: [["#", "Student Name", "Student ID", "Status"]],
-        body: rows,
-    });
+// Pull the newest data from Supabase without clobbering queued offline changes
+// or an attendance edit the teacher made while the request was in flight.
+// Returns "synced", "skipped" (local work present) or "offline".
+async function syncLatestFromCloud() {
+    if (!cloudReady()) return "offline";
 
-    const safeSec = sec.replace(/[\\/:*?"<>|]+/g, "-").trim() || "Section";
-    doc.save(`Attendance_${safeSec}_${date}.pdf`);
-    showToast("Exported PDF successfully!", "success");
+    let queued = [];
+    try { queued = JSON.parse(localStorage.getItem(pendingKey()) || "[]"); } catch (err) { queued = []; }
+    if (Array.isArray(queued) && queued.length > 0) return "skipped";
+
+    const seqBefore = localMutationSeq;
+    const snapshot = await fetchCloudState();
+    if (seqBefore !== localMutationSeq) return "skipped";
+
+    applyCloudState(snapshot);
+    saveLocalStore();
+    populateSectionDropdowns();
+    loadAttendanceSheet();
+    if (activeTab === "dashboard") renderDashboard();
+    if (activeTab === "directory") renderDirectory();
+
+    lastCloudSyncAt = Date.now();
+    refreshIcons();
+    return "synced";
+}
+
+async function refreshAttendanceFromCloud() {
+    if (!cloudReady()) {
+        showToast("Connect to the internet to refresh check-ins.", "error");
+        return;
+    }
+    try {
+        const result = await syncLatestFromCloud();
+        if (result === "synced") showToast("Latest attendance loaded.", "success");
+        else if (result === "skipped") showToast("You have unsaved changes — refresh skipped so nothing is lost.", "error");
+    } catch (err) {
+        console.error("Refresh failed:", err);
+        showToast("Could not refresh attendance right now.", "error");
+    }
 }
 
 // --- Modals & Actions ---
@@ -1199,6 +1310,50 @@ function confirmDeleteSection(sec) {
         await trySync({ t: "sec-", name: sec, codes });
     };
     openModal("modal-delete-section");
+}
+
+// --- Student QR ID cards ---
+// The payload is intentionally just the student code with a SCHOLOG: prefix;
+// scan.html accepts it both from the camera and from typed input.
+function studentQrPayload(studentId) {
+    return `SCHOLOG:${String(studentId || "").trim()}`;
+}
+
+function openStudentQr(id) {
+    const stud = state.students.find(s => s.id === id);
+    if (!stud) {
+        showToast("Student not found — the list may have changed.", "error");
+        return;
+    }
+
+    const container = document.getElementById("student-qr-canvas");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const payload = studentQrPayload(stud.student_id);
+    if (typeof window.qrcode !== "function") {
+        container.textContent = "QR generator unavailable — students can type their Student ID instead.";
+    } else {
+        try {
+            const qr = window.qrcode(0, "M");
+            qr.addData(payload);
+            qr.make();
+            container.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
+            container.dataset.payload = payload;
+        } catch (err) {
+            console.error("Could not build the student QR code:", err);
+            container.textContent = "Could not build the QR code — students can type their Student ID instead.";
+        }
+    }
+
+    document.getElementById("student-qr-name").textContent = stud.name;
+    document.getElementById("student-qr-code").textContent = stud.student_id;
+    openModal("modal-student-qr");
+    refreshIcons();
+}
+
+function printStudentQr() {
+    window.print();
 }
 
 // --- Student Attendance Calendar History ---
