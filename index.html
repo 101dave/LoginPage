@@ -3,17 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scholog — Sign In & Account Management</title>
+    <title>Scholog — Sign In &amp; Account Management</title>
     <meta name="theme-color" content="#0f172a">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
-    <!-- Supabase JS SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        (function () {
+            try {
+                const saved = localStorage.getItem("scholog_theme");
+                const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+                if (saved === "dark" || (!saved && prefersDark)) {
+                    document.documentElement.setAttribute("data-theme", "dark");
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <!-- Local Offline-Ready Supabase JS SDK (with automatic CDN fallback if copied standalone) -->
+    <script src="vendor/supabase.min.js" onerror="document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2&quot;><\/script>')"></script>
     <!-- Custom Modern Styles -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Dark / Light Theme Toggle -->
+    <button type="button" id="themeToggleBtn" class="theme-floating-btn" onclick="toggleTheme()" title="Toggle dark/light mode" aria-label="Toggle dark mode">
+        <svg id="themeIconMoon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        <svg id="themeIconSun" class="hidden" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+    </button>
+
     <div class="container">
         <div class="card">
             <!-- Brand / Header -->
@@ -26,25 +43,44 @@
             </div>
 
             <!-- Tabs Switcher -->
-            <div id="authTabs" class="tabs">
-                <button id="loginTab" type="button" class="tab active" onclick="switchTab('login')">Sign In</button>
-                <button id="signupTab" type="button" class="tab" onclick="switchTab('signup')">Create Account</button>
+            <div id="authTabs" class="tabs" role="tablist">
+                <button id="loginTab" type="button" role="tab" aria-selected="true" class="tab active" onclick="switchTab('login')">Sign In</button>
+                <button id="signupTab" type="button" role="tab" aria-selected="false" class="tab" onclick="switchTab('signup')">Create Account</button>
             </div>
 
-            <div id="alertBox" class="alert hidden"></div>
+            <div id="alertBox" class="alert hidden" role="status" aria-live="polite"></div>
+
+            <!-- Google OAuth Section (shown on Sign In & Create Account) -->
+            <div id="oauthSection">
+                <button type="button" id="googleSignInBtn" class="oauth-btn" onclick="handleGoogleLogin()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                        <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.26-.97 2.33-2.06 3.05l3.33 2.58c1.94-1.79 3.06-4.43 3.06-7.55 0-.73-.07-1.43-.19-2.1H12z"/>
+                        <path fill="#34A853" d="M12 22c2.77 0 5.1-.92 6.8-2.49l-3.33-2.58c-.92.62-2.1.99-3.47.99-2.67 0-4.93-1.8-5.74-4.22l-3.44 2.66C4.52 19.74 7.99 22 12 22z"/>
+                        <path fill="#FBBC05" d="M6.26 13.7A6.01 6.01 0 0 1 5.94 12c0-.59.11-1.16.32-1.7L2.82 7.64A9.99 9.99 0 0 0 2 12c0 1.61.39 3.14 1.08 4.49l3.18-2.79z"/>
+                        <path fill="#4285F4" d="M12 6.08c1.5 0 2.85.52 3.91 1.53l2.93-2.93C17.09 3.03 14.77 2 12 2 7.99 2 4.52 4.26 2.82 7.64l3.44 2.66c.81-2.42 3.07-4.22 5.74-4.22z"/>
+                    </svg>
+                    <span>Continue with Google</span>
+                </button>
+                <div class="auth-divider"><span>or with email</span></div>
+            </div>
 
             <!-- Login Form -->
             <form id="loginForm" class="form active" onsubmit="handleLogin(event)">
                 <div class="input-group">
                     <label for="loginEmail">Email Address</label>
-                    <input type="email" id="loginEmail" required placeholder="you@example.com" autocomplete="email">
+                    <input type="email" id="loginEmail" required placeholder="teacher@school.edu.ph" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <div class="label-row">
-                        <label for="loginPassword" style="margin-bottom: 0;">Password</label>
+                        <label for="loginPassword">Password</label>
                         <button type="button" id="forgotPasswordLink" class="link-btn" onclick="openForgotPassword()">Forgot password?</button>
                     </div>
-                    <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
+                        <button type="button" class="password-eye-btn" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="Show password">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <button type="submit" id="loginSubmitBtn" class="btn">
                     <span>Sign In</span>
@@ -55,11 +91,34 @@
             <form id="signupForm" class="form" onsubmit="handleSignup(event)">
                 <div class="input-group">
                     <label for="signupEmail">Email Address</label>
-                    <input type="email" id="signupEmail" required placeholder="you@example.com" autocomplete="email">
+                    <input type="email" id="signupEmail" required placeholder="teacher@school.edu.ph" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <label for="signupPassword">Password</label>
-                    <input type="password" id="signupPassword" required placeholder="At least 6 characters" autocomplete="new-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="signupPassword" required placeholder="At least 6 characters" autocomplete="new-password" oninput="updatePasswordStrength(this.value)">
+                        <button type="button" class="password-eye-btn" onclick="togglePasswordVisibility('signupPassword', this)" aria-label="Show password">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                    <div id="signupStrengthWrap" class="password-strength-wrap hidden">
+                        <div class="strength-bars">
+                            <span class="strength-bar-seg" id="strSeg1"></span>
+                            <span class="strength-bar-seg" id="strSeg2"></span>
+                            <span class="strength-bar-seg" id="strSeg3"></span>
+                            <span class="strength-bar-seg" id="strSeg4"></span>
+                        </div>
+                        <span class="strength-label" id="signupStrengthLabel">Password strength</span>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="signupConfirmPassword">Confirm Password</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="signupConfirmPassword" required placeholder="Re-enter your password" autocomplete="new-password">
+                        <button type="button" class="password-eye-btn" onclick="togglePasswordVisibility('signupConfirmPassword', this)" aria-label="Show password">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <button type="submit" id="signupSubmitBtn" class="btn">
                     <span>Create Account</span>
@@ -71,7 +130,7 @@
                 <p class="form-intro">Enter the email address linked to your account and we'll send you a password reset link.</p>
                 <div class="input-group">
                     <label for="forgotEmail">Email Address</label>
-                    <input type="email" id="forgotEmail" required placeholder="you@example.com" autocomplete="email">
+                    <input type="email" id="forgotEmail" required placeholder="teacher@school.edu.ph" autocomplete="email">
                 </div>
                 <button type="submit" id="forgotSubmitBtn" class="btn">
                     <span>Send Reset Link</span>
@@ -86,11 +145,21 @@
                 <p class="form-intro">Choose a strong new password for your Scholog account (at least 6 characters).</p>
                 <div class="input-group">
                     <label for="newPassword">New Password</label>
-                    <input type="password" id="newPassword" required placeholder="At least 6 characters" autocomplete="new-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="newPassword" required placeholder="At least 6 characters" autocomplete="new-password">
+                        <button type="button" class="password-eye-btn" onclick="togglePasswordVisibility('newPassword', this)" aria-label="Show password">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="input-group">
                     <label for="confirmNewPassword">Confirm New Password</label>
-                    <input type="password" id="confirmNewPassword" required placeholder="Re-enter new password" autocomplete="new-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="confirmNewPassword" required placeholder="Re-enter new password" autocomplete="new-password">
+                        <button type="button" class="password-eye-btn" onclick="togglePasswordVisibility('confirmNewPassword', this)" aria-label="Show password">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <button type="submit" id="resetSubmitBtn" class="btn">
                     <span>Update Password</span>
@@ -99,23 +168,32 @@
                     <button type="button" class="link-btn" onclick="cancelResetPassword()">&larr; Cancel &amp; return to Sign In</button>
                 </div>
             </form>
+
+            <!-- Card Footer -->
+            <div class="auth-footer">
+                <a href="privacy.html">Privacy Policy</a>
+                <button type="button" class="link-btn" onclick="enterOfflineWorkspace()">Try Offline Workspace &rarr;</button>
+            </div>
         </div>
 
-        <!-- Download App Suggestion Box sa Ilalim -->
+        <!-- Install App Suggestion Banner (English, all supported browsers) -->
         <div id="pwaInstallBanner" class="install-suggestion-banner hidden">
             <div class="install-suggestion-content">
                 <div class="install-suggestion-text">
-                    <strong>Gusto mo ba ng mas mabilis na access?</strong>
-                    <p>I-download ang Scholog app sa iyong device.</p>
+                    <strong>Want faster, offline access?</strong>
+                    <p>Install the Scholog app directly on your device.</p>
                 </div>
-                <button id="pwaInstallBtn" type="button" class="btn-install-suggestion" onclick="triggerPwaInstall()">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    <span>Download App</span>
-                </button>
+                <div class="install-actions-group">
+                    <button id="pwaInstallBtn" type="button" class="btn-install-suggestion" onclick="triggerPwaInstall()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Install App</span>
+                    </button>
+                    <button type="button" class="btn-install-dismiss" onclick="dismissPwaBanner()" aria-label="Dismiss install banner" title="Dismiss">&times;</button>
+                </div>
             </div>
         </div>
     </div>

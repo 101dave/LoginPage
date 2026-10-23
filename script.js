@@ -13,62 +13,136 @@ let authBusy = false;
 let isRecoveryMode = false;
 let resetCooldownTimer = null;
 
-// PWA Install Prompt State
+// PWA Install Prompt State (supports all modern browsers: Chrome, Edge, Brave, Samsung Internet, Opera)
 let deferredPrompt = null;
 
-// Helper para i-check kung Google Chrome ang gamit
-function isGoogleChrome() {
-    const ua = navigator.userAgent;
-    const isChromium = window.chrome;
-    const isOpera = /OPR\//.test(ua);
-    const isEdge = /Edg\//.test(ua);
-    const isSamsungBrowser = /SamsungBrowser/.test(ua);
-    
-    // Siguraduhing Chromium/Chrome ito pero hindi Edge, Opera, o iba pang balat ng Chrome
-    return isChromium && !isOpera && !isEdge && !isSamsungBrowser;
+// --- Dark / Light Mode ---
+function syncThemeIcons() {
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    const moon = document.getElementById("themeIconMoon");
+    const sun = document.getElementById("themeIconSun");
+    if (moon) moon.classList.toggle("hidden", isDark);
+    if (sun) sun.classList.toggle("hidden", !isDark);
 }
 
+function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    if (next === "dark") {
+        html.setAttribute("data-theme", "dark");
+    } else {
+        html.removeAttribute("data-theme");
+    }
+    try {
+        localStorage.setItem("scholog_theme", next);
+    } catch (e) {}
+    syncThemeIcons();
+}
+
+// --- Password Visibility Eye Toggle & Strength Indicator ---
+const EYE_OPEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+
+function togglePasswordVisibility(inputId, btnEl) {
+    const input = document.getElementById(inputId);
+    if (!input || !btnEl) return;
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    btnEl.innerHTML = reveal ? EYE_OFF_SVG : EYE_OPEN_SVG;
+    btnEl.setAttribute("aria-label", reveal ? "Hide password" : "Show password");
+}
+
+function updatePasswordStrength(pw) {
+    const wrap = document.getElementById("signupStrengthWrap");
+    const label = document.getElementById("signupStrengthLabel");
+    if (!wrap || !label) return;
+
+    if (!pw) {
+        wrap.classList.add("hidden");
+        return;
+    }
+    wrap.classList.remove("hidden");
+
+    let score = 0;
+    if (pw.length >= 6) score++;
+    if (pw.length >= 10) score++;
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+    if (/\d/.test(pw) || /[^A-Za-z0-9]/.test(pw)) score++;
+
+    if (pw.length < 6) score = 1;
+
+    const levels = [
+        { cls: "weak", text: "Too short (minimum 6 characters)" },
+        { cls: "weak", text: "Weak — add numbers or uppercase letters" },
+        { cls: "fair", text: "Fair — consider making it longer" },
+        { cls: "good", text: "Good password" },
+        { cls: "strong", text: "Strong password" }
+    ];
+    const info = pw.length < 6 ? levels[0] : levels[score];
+
+    for (let i = 1; i <= 4; i++) {
+        const seg = document.getElementById(`strSeg${i}`);
+        if (seg) {
+            seg.className = "strength-bar-seg" + (i <= score ? ` ${info.cls}` : "");
+        }
+    }
+    label.textContent = info.text;
+}
+
+// --- Universal PWA Install Banner ---
 window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e;
-    
-    // Ipakita lamang ang banner kung Google Chrome ang gamit at hindi pa naka-install
+
+    let dismissed = false;
+    try {
+        dismissed = sessionStorage.getItem("scholog_pwa_dismissed") === "1";
+    } catch (err) {}
+
     const installBanner = document.getElementById("pwaInstallBanner");
-    if (installBanner && isGoogleChrome()) {
+    if (installBanner && !dismissed) {
         installBanner.classList.remove("hidden");
     }
 });
+
+function dismissPwaBanner() {
+    try {
+        sessionStorage.setItem("scholog_pwa_dismissed", "1");
+    } catch (err) {}
+    document.getElementById("pwaInstallBanner")?.classList.add("hidden");
+}
 
 async function triggerPwaInstall() {
     if (deferredPrompt) {
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === "accepted") {
-            showAlert("App installed successfully!", "success");
-            const installBanner = document.getElementById("pwaInstallBanner");
-            if (installBanner) installBanner.classList.add("hidden");
+            showAlert("App installed! You can now open Scholog from your home screen or desktop.", "success");
+            document.getElementById("pwaInstallBanner")?.classList.add("hidden");
         }
         deferredPrompt = null;
     } else {
-        showAlert("To install Scholog: tap your browser's menu button and select 'Install app' or 'Add to Home screen'.", "success");
+        showAlert("To install Scholog: open your browser menu and choose 'Install app' or 'Add to Home Screen'.", "success");
     }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-    if (window.matchMedia("(display-mode: standalone)").matches) {
-        const installBanner = document.getElementById("pwaInstallBanner");
-        if (installBanner) installBanner.classList.add("hidden");
+    syncThemeIcons();
+    if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) {
+        document.getElementById("pwaInstallBanner")?.classList.add("hidden");
     }
 });
 
 if (window.supabase) {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Catch PASSWORD_RECOVERY in both implicit (#type=recovery) and PKCE (?code=...) flows
-    supabaseClient.auth.onAuthStateChange((event) => {
+    // Catch PASSWORD_RECOVERY and OAuth SIGNED_IN across implicit & PKCE flows
+    supabaseClient.auth.onAuthStateChange((event, session) => {
         if (event === "PASSWORD_RECOVERY") {
             isRecoveryMode = true;
             openResetPasswordView();
+        } else if (event === "SIGNED_IN" && session && !isRecoveryMode && !authBusy) {
+            window.location.href = "main.html";
         }
     });
 }
@@ -89,6 +163,11 @@ async function processAuthUrlFragment(rawFragment) {
     if (errCode || errDesc) {
         isRecoveryMode = false;
         cleanUrlBar();
+        if (/provider is not enabled|unsupported provider/i.test(String(errDesc))) {
+            switchTab("login");
+            showAlert("Google Sign-In is not enabled on the Supabase project yet. Enable the Google provider under Authentication → Providers in Supabase, or sign in with your email below.");
+            return true;
+        }
         openForgotPassword(false);
         if (/expired/i.test(String(errCode) + " " + String(errDesc))) {
             showAlert("That password reset link has expired or was already used. Enter your email below to get a fresh link.");
@@ -120,7 +199,6 @@ async function processAuthUrlFragment(rawFragment) {
     return false;
 }
 
-// Also handle same-tab hash navigation (e.g. mobile browser reusing an open tab)
 window.addEventListener("hashchange", () => {
     processAuthUrlFragment();
 });
@@ -165,34 +243,42 @@ function hideAllForms() {
 
 function switchTab(tab) {
     const authTabs = document.getElementById("authTabs");
+    const oauthSection = document.getElementById("oauthSection");
     const loginTab = document.getElementById("loginTab");
     const signupTab = document.getElementById("signupTab");
     const alertBox = document.getElementById("alertBox");
 
     alertBox.classList.add("hidden");
     authTabs?.classList.remove("hidden");
+    oauthSection?.classList.remove("hidden");
     hideAllForms();
     setHeaderText("Welcome to Scholog", "Sign in to manage your class attendance");
 
     if (tab === "login") {
         loginTab.classList.add("active");
+        loginTab.setAttribute("aria-selected", "true");
         signupTab.classList.remove("active");
+        signupTab.setAttribute("aria-selected", "false");
         document.getElementById("loginForm").classList.add("active");
     } else {
         signupTab.classList.add("active");
+        signupTab.setAttribute("aria-selected", "true");
         loginTab.classList.remove("active");
+        loginTab.setAttribute("aria-selected", "false");
         document.getElementById("signupForm").classList.add("active");
     }
 }
 
 function openForgotPassword(clearMessages = true) {
     const authTabs = document.getElementById("authTabs");
+    const oauthSection = document.getElementById("oauthSection");
     const alertBox = document.getElementById("alertBox");
     const loginEmail = document.getElementById("loginEmail")?.value.trim();
     const forgotEmail = document.getElementById("forgotEmail");
 
     if (clearMessages) alertBox.classList.add("hidden");
     authTabs?.classList.add("hidden");
+    oauthSection?.classList.add("hidden");
     hideAllForms();
     setHeaderText("Forgot Password", "Reset access to your Scholog account");
 
@@ -204,10 +290,12 @@ function openForgotPassword(clearMessages = true) {
 
 function openResetPasswordView() {
     const authTabs = document.getElementById("authTabs");
+    const oauthSection = document.getElementById("oauthSection");
     const alertBox = document.getElementById("alertBox");
 
     alertBox.classList.add("hidden");
     authTabs?.classList.add("hidden");
+    oauthSection?.classList.add("hidden");
     hideAllForms();
     setHeaderText("Set New Password", "Create a new password for your account");
     document.getElementById("resetForm")?.classList.add("active");
@@ -231,6 +319,9 @@ function showAlert(message, type = "error") {
 
 function friendlyAuthError(err) {
     const msg = (err && err.message) ? err.message : "Something went wrong.";
+    if (/provider is not enabled|unsupported provider/i.test(msg)) {
+        return "Google Sign-In is not configured yet in Supabase Auth → Providers → Google. Please sign in with email or enable Google OAuth.";
+    }
     if (/email not confirmed/i.test(msg)) {
         return "Please confirm your email first — check your inbox for the confirmation link, then sign in.";
     }
@@ -247,7 +338,7 @@ function friendlyAuthError(err) {
         return "Email limit reached right now — check your inbox/spam folder for an earlier email, or wait a bit and try again.";
     }
     if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-        return "Cannot reach the server. Please check your internet connection and try again.";
+        return "Cannot reach the server. Please check your internet connection or use Offline Workspace below.";
     }
     return msg;
 }
@@ -284,6 +375,36 @@ function startResetCooldown(seconds) {
     resetCooldownTimer = setInterval(tick, 1000);
 }
 
+async function handleGoogleLogin() {
+    if (authBusy) return;
+    if (!supabaseClient) {
+        showAlert("Google Sign-In requires an internet connection.", "error");
+        return;
+    }
+
+    try {
+        const redirectTo = new URL("main.html", window.location.href).href;
+        const { error } = await supabaseClient.auth.signInWithOAuth({
+            provider: "google",
+            options: { redirectTo }
+        });
+        if (error) throw error;
+    } catch (err) {
+        showAlert(friendlyAuthError(err));
+    }
+}
+
+function enterOfflineWorkspace() {
+    const existing = localStorage.getItem("scholog_local_user");
+    if (!existing) {
+        localStorage.setItem("scholog_local_user", JSON.stringify({
+            email: "teacher@local.scholog",
+            name: "Teacher"
+        }));
+    }
+    window.location.href = "main.html";
+}
+
 async function handleLogin(e) {
     e.preventDefault();
     if (authBusy) return;
@@ -302,11 +423,11 @@ async function handleLogin(e) {
             const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
             showAlert("Signed in successfully! Loading your data from the cloud...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 600);
+            setTimeout(() => { window.location.href = "main.html"; }, 500);
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
             showAlert("Signed in locally! Redirecting...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 600);
+            setTimeout(() => { window.location.href = "main.html"; }, 500);
         }
     } catch (err) {
         setSubmitting(e.target, false, "Signing in...", "Sign In");
@@ -320,6 +441,8 @@ async function handleSignup(e) {
 
     const email = document.getElementById("signupEmail").value.trim();
     const password = document.getElementById("signupPassword").value;
+    const confirmPasswordEl = document.getElementById("signupConfirmPassword");
+    const confirmPassword = confirmPasswordEl ? confirmPasswordEl.value : password;
 
     if (!email || !password) {
         showAlert("Please fill in all required fields.");
@@ -328,6 +451,11 @@ async function handleSignup(e) {
 
     if (password.length < 6) {
         showAlert("Password must be at least 6 characters long.");
+        return;
+    }
+
+    if (password !== confirmPassword) {
+        showAlert("Passwords do not match. Please double-check both password fields.");
         return;
     }
 
@@ -355,7 +483,7 @@ async function handleSignup(e) {
 
             if (data.session) {
                 showAlert("Account created! Loading your workspace...", "success");
-                setTimeout(() => { window.location.href = "main.html"; }, 600);
+                setTimeout(() => { window.location.href = "main.html"; }, 500);
             } else {
                 setSubmitting(e.target, false, "Creating account...", "Create Account");
                 showAlert("Account created! Check your email to confirm your account, then sign in.", "success");
@@ -364,7 +492,7 @@ async function handleSignup(e) {
         } else {
             localStorage.setItem("scholog_local_user", JSON.stringify({ email, name: email.split("@")[0] }));
             showAlert("Account created locally! Redirecting...", "success");
-            setTimeout(() => { window.location.href = "main.html"; }, 800);
+            setTimeout(() => { window.location.href = "main.html"; }, 600);
         }
     } catch (err) {
         setSubmitting(e.target, false, "Creating account...", "Create Account");
@@ -435,7 +563,7 @@ async function handleResetPassword(e) {
         isRecoveryMode = false;
         cleanUrlBar();
         showAlert("Password updated! Signing you in...", "success");
-        setTimeout(() => { window.location.href = "main.html"; }, 800);
+        setTimeout(() => { window.location.href = "main.html"; }, 700);
     } catch (err) {
         setSubmitting(e.target, false, "Updating password...", "Update Password");
         showAlert(friendlyAuthError(err));

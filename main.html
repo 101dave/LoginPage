@@ -3,19 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scholog - Attendance Management</title>
+    <title>Scholog — Attendance Management</title>
     <meta name="theme-color" content="#0f172a">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
-    <!-- Supabase JS SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>    
-    <!-- jsPDF at jsPDF-AutoTable CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-    <!-- Pure CSS -->
+    <script>
+        (function () {
+            try {
+                const saved = localStorage.getItem("scholog_theme");
+                const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+                if (saved === "dark" || (!saved && prefersDark)) {
+                    document.documentElement.setAttribute("data-theme", "dark");
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <!-- Self-Hosted Offline-Ready Libraries (with automatic CDN fallback if copied without vendor/) -->
+    <script src="vendor/lucide.min.js" onerror="document.write('<script src=&quot;https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js&quot;><\/script>')"></script>
+    <script src="vendor/supabase.min.js" onerror="document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2&quot;><\/script>')"></script>
+    <script src="vendor/jspdf.umd.min.js" onerror="document.write('<script src=&quot;https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js&quot;><\/script>')"></script>
+    <script src="vendor/jspdf.plugin.autotable.min.js" onerror="document.write('<script src=&quot;https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js&quot;><\/script>')"></script>
+    <script src="vendor/qrcode.min.js" onerror="document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js&quot;><\/script>')"></script>
+    <script src="vendor/jsqr.min.js" onerror="document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js&quot;><\/script>')"></script>
+    <script src="vendor/xlsx.mini.min.js" onerror="document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js&quot;><\/script>')"></script>
     <link rel="stylesheet" href="main.css">
 </head>
 <body>
@@ -39,15 +50,20 @@
             </nav>
 
             <div class="nav-actions">
-                <!-- User Profile Card (Clickable to edit profile) -->
-                <div class="user-profile-card" onclick="openProfileModal()" title="Click to edit profile">
+                <!-- Dark Mode Toggle -->
+                <button type="button" id="themeToggleBtn" onclick="toggleTheme()" class="icon-btn" title="Toggle Dark / Light Mode" aria-label="Toggle Dark Mode">
+                    <i data-lucide="moon" id="navThemeIcon"></i>
+                </button>
+
+                <!-- User Profile Card -->
+                <div class="user-profile-card" onclick="openProfileModal()" title="Click to edit profile &amp; backups">
                     <div class="user-avatar-wrapper">
                         <div class="user-avatar" id="userAvatar">U</div>
                         <span class="profile-status-dot"></span>
                     </div>
                     <div class="user-info mobile-hide">
                         <span class="user-name" id="userNameDisplay">Loading...</span>
-                        <span class="user-role-placeholder" style="font-size: 9px; margin-top: 1px; display: inline-block; width: fit-content; color: var(--text-muted);">User</span>
+                        <span style="font-size: 9.5px; margin-top: 1px; display: inline-block; width: fit-content; color: var(--text-muted);" id="syncModeBadge">Teacher</span>
                     </div>
                     <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--text-muted);" class="mobile-hide"></i>
                 </div>
@@ -56,8 +72,9 @@
                     <i data-lucide="log-out"></i>
                     <span>Logout</span>
                 </button>
+
                 <!-- Hamburger Toggle Button (Mobile Only) -->
-                <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide">
+                <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide" aria-label="Menu">
                     <i data-lucide="menu"></i>
                 </button>
             </div>
@@ -66,17 +83,17 @@
         <!-- Mobile Dropdown Hamburger Menu -->
         <div id="mobileMenu" class="mobile-dropdown-menu hidden">
             <button onclick="switchTab('dashboard'); toggleMobileMenu()" id="mob-nav-dashboard" class="mob-menu-item active">
-                <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Dashboard
+                <i data-lucide="layout-dashboard"></i> Dashboard
             </button>
             <button onclick="switchTab('directory'); toggleMobileMenu()" id="mob-nav-directory" class="mob-menu-item">
-                <i data-lucide="users" style="width: 16px; height: 16px;"></i> Class List
+                <i data-lucide="users"></i> Class List
             </button>
             <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">
-                <i data-lucide="calendar-check" style="width: 16px; height: 16px;"></i> Take Attendance
+                <i data-lucide="calendar-check"></i> Take Attendance
             </button>
             <div class="mob-menu-divider"></div>
             <button onclick="handleLogout()" class="mob-menu-item text-rose">
-                <i data-lucide="log-out" style="width: 16px; height: 16px;"></i> Logout
+                <i data-lucide="log-out"></i> Logout
             </button>
         </div>
     </header>
@@ -86,36 +103,92 @@
         <!-- Toast Notifications -->
         <div id="toast-container" class="toast-container"></div>
 
+        <!-- Quick Remarks Presets -->
+        <datalist id="remarks-presets">
+            <option value="Medical certificate"></option>
+            <option value="Parent excuse letter"></option>
+            <option value="School competition / event"></option>
+            <option value="Family emergency"></option>
+            <option value="Heavy traffic / weather"></option>
+            <option value="Clinic visit"></option>
+        </datalist>
+
         <!-- ================= DASHBOARD VIEW ================= -->
         <section id="view-dashboard" class="view-section">
+            <div class="dash-toolbar">
+                <div>
+                    <h2>Overview &amp; Analytics</h2>
+                    <p>Monitor daily attendance rates, trends, and early student warnings</p>
+                </div>
+                <div class="dash-controls">
+                    <input type="date" id="dash-date-input" onchange="onDashDateChange()" class="form-control" aria-label="Dashboard date">
+                    <button type="button" id="dash-today-btn" onclick="resetDashToToday()" class="btn btn-secondary btn-sm hidden">Today</button>
+                    <select id="dash-subject-filter" onchange="renderDashboard()" class="form-control" aria-label="Subject filter"></select>
+                </div>
+            </div>
+
             <div class="stats-grid">
                 <div class="stat-card">
                     <div>
                         <p class="stat-label">Total Students</p>
                         <h3 id="stat-total" class="stat-value">0</h3>
+                        <p id="stat-sections-sub" class="stat-sub">0 Sections</p>
                     </div>
                     <div class="stat-icon"><i data-lucide="users"></i></div>
                 </div>
                 <div class="stat-card">
                     <div>
-                        <p class="stat-label">Present Today</p>
+                        <p class="stat-label">Present</p>
                         <h3 id="stat-present" class="stat-value text-emerald">0</h3>
+                        <p id="stat-present-sub" class="stat-sub">0 Late &bull; 0 Excused</p>
                     </div>
                     <div class="stat-icon icon-emerald"><i data-lucide="user-check"></i></div>
                 </div>
                 <div class="stat-card">
                     <div>
-                        <p class="stat-label">Absent Today</p>
+                        <p class="stat-label">Absent</p>
                         <h3 id="stat-absent" class="stat-value text-rose">0</h3>
+                        <p id="stat-absent-sub" class="stat-sub">0 Unmarked</p>
                     </div>
                     <div class="stat-icon icon-rose"><i data-lucide="user-x"></i></div>
                 </div>
                 <div class="stat-card">
                     <div>
-                        <p class="stat-label">Overall Rate</p>
+                        <p class="stat-label">Attendance Rate</p>
                         <h3 id="stat-rate" class="stat-value">0%</h3>
+                        <p id="stat-rate-sub" class="stat-sub">No records for date</p>
                     </div>
                     <div class="stat-icon"><i data-lucide="pie-chart"></i></div>
+                </div>
+            </div>
+
+            <!-- Analytics Row: Trend Chart + At-Risk Early Warning -->
+            <div class="insights-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>Attendance Trend</h2>
+                            <p>Click any bar to inspect that day's summary</p>
+                        </div>
+                        <div style="display: inline-flex; gap: 6px;">
+                            <button type="button" id="trend-range-7" onclick="setTrendRange(7)" class="btn btn-primary btn-sm">7 Days</button>
+                            <button type="button" id="trend-range-14" onclick="setTrendRange(14)" class="btn btn-secondary btn-sm">14 Days</button>
+                        </div>
+                    </div>
+                    <div class="trend-chart-body">
+                        <div id="trend-chart-container" class="trend-bars-row"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2>At-Risk Students</h2>
+                            <p>3+ consecutive absences or &lt; 80% attendance</p>
+                        </div>
+                        <span id="at-risk-badge" class="badge badge-emerald">0 Flagged</span>
+                    </div>
+                    <div id="at-risk-list" class="at-risk-body"></div>
                 </div>
             </div>
 
@@ -123,7 +196,7 @@
                 <div class="card-header">
                     <div>
                         <h2>Attendance Breakdown by Section</h2>
-                        <p>Real-time attendance rates per grade and section</p>
+                        <p>Section-level attendance rates and quick access</p>
                     </div>
                     <span id="dash-date-label" class="badge badge-gray">Today</span>
                 </div>
@@ -136,13 +209,17 @@
             <div class="section-header-flex">
                 <div>
                     <h2>Class List</h2>
-                    <p>Manage student records organized by section</p>
+                    <p>Manage sections, subjects, QR ID cards, and student records</p>
                 </div>
                 <div class="search-action-group">
                     <div class="search-box">
                         <i data-lucide="search"></i>
-                        <input type="text" id="directory-search" oninput="renderDirectory()" placeholder="Search name or ID...">
+                        <input type="text" id="directory-search" oninput="renderDirectory()" placeholder="Search name, ID, or email...">
                     </div>
+                    <button onclick="openImportModal()" class="btn btn-secondary" title="Bulk import students from CSV, Excel, or spreadsheet copy-paste">
+                        <i data-lucide="upload"></i>
+                        <span>Import CSV/Excel</span>
+                    </button>
                     <button onclick="openAddSectionModal()" class="btn btn-secondary">
                         <i data-lucide="folder-plus"></i>
                         <span>Add Section</span>
@@ -180,23 +257,36 @@
                 <div class="filter-flex">
                     <div class="filter-inputs">
                         <div class="input-group">
-                            <label for="att-date"><i data-lucide="calendar" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Date</label>
+                            <label for="att-date"><span class="label-inline"><i data-lucide="calendar"></i> Select Date</span></label>
                             <input type="date" id="att-date" onchange="loadAttendanceSheet()" class="form-control">
                         </div>
                         <div class="input-group">
-                            <label for="att-section"><i data-lucide="users" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Section</label>
-                            <select id="att-section" onchange="loadAttendanceSheet()" class="form-control"></select>
+                            <label for="att-section"><span class="label-inline"><i data-lucide="users"></i> Select Section</span></label>
+                            <select id="att-section" onchange="onAttSectionChange()" class="form-control"></select>
+                        </div>
+                        <div class="input-group">
+                            <label for="att-subject">
+                                <span class="label-inline"><i data-lucide="book-open"></i> Subject / Schedule</span>
+                                <button type="button" onclick="promptAddSubject()" class="action-link action-move" style="padding: 0 4px;">+ Add</button>
+                            </label>
+                            <select id="att-subject" onchange="loadAttendanceSheet()" class="form-control"></select>
                         </div>
                     </div>
                     <div class="filter-actions">
-                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle" style="flex: 1;">
+                        <button onclick="openQrScannerModal()" class="btn btn-accent-blue">
+                            <i data-lucide="qr-code"></i> Scan QR
+                        </button>
+                        <button onclick="markAllAttendance('Present')" class="btn btn-success-subtle">
                             <i data-lucide="check-circle-2"></i> All Present
                         </button>
-                        <button onclick="saveAttendance()" class="btn btn-primary" style="flex: 1;">
+                        <button onclick="saveAttendance()" class="btn btn-primary">
                             <i data-lucide="save"></i> Save
                         </button>
-                        <button onclick="exportAttendanceToPDF()" class="btn btn-secondary" style="flex: 1;">
-                            <i data-lucide="file-text"></i> Export PDF
+                        <button onclick="exportAttendanceToPDF()" class="btn btn-secondary">
+                            <i data-lucide="file-text"></i> Daily PDF
+                        </button>
+                        <button onclick="exportMonthlySF2Excel()" class="btn btn-secondary" title="Export official DepEd SF2 style monthly matrix (.xlsx)">
+                            <i data-lucide="file-spreadsheet"></i> Monthly SF2 (.xlsx)
                         </button>
                     </div>
                 </div>
@@ -205,8 +295,12 @@
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2>Attendance Sheet Table</h2>
-                        <p id="att-sheet-subtitle" style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px;">Mark or review student status for the selected date</p>
+                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <h2>Attendance Sheet</h2>
+                            <span id="att-sheet-status-badge" class="badge badge-gray">Unmarked</span>
+                            <button type="button" id="att-clear-btn" onclick="clearCurrentSheet()" class="action-link action-delete hidden" title="Clear all marks for this date &amp; subject">Clear Marks</button>
+                        </div>
+                        <p id="att-sheet-subtitle" style="margin-top: 4px;">Select a status for each student or click All Present</p>
                     </div>
                     <div class="legend-group">
                         <span><span class="dot dot-emerald"></span>Present</span>
@@ -219,11 +313,11 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th style="width: 50px;">#</th>
+                                <th style="width: 46px;">#</th>
                                 <th>Student Name</th>
                                 <th>Student ID</th>
-                                <th>Date</th>
                                 <th class="text-center">Status Selection</th>
+                                <th>Remarks / Excuse Note</th>
                             </tr>
                         </thead>
                         <tbody id="att-table-body"></tbody>
@@ -233,7 +327,7 @@
         </section>
     </main>
 
-    <!-- Modal: Profile Settings & Data Management (Redesigned UI) -->
+    <!-- Modal: Profile Settings & Data Management -->
     <div id="modal-profile" class="modal-backdrop hidden">
         <div class="modal-content profile-modal-content">
             <div class="modal-header">
@@ -246,28 +340,26 @@
                 </button>
             </div>
 
-            <!-- Scrollable Modal Body -->
             <div class="profile-modal-body">
-                <!-- Section 1: Profile Information -->
                 <form onsubmit="handleProfileSubmit(event)" class="profile-form-section">
-                    <!-- Avatar Header Box -->
                     <div class="profile-header-card">
                         <div class="profile-preview-avatar" id="modalPreviewAvatar">U</div>
                         <div class="profile-header-info">
                             <span class="profile-header-title">Profile Picture</span>
+                            <span style="font-size: 11.5px; color: var(--text-muted);" id="profile-email-display"></span>
                         </div>
                     </div>
 
                     <div class="input-group">
                         <label for="profile-display-name">
-                            <i data-lucide="user" style="width: 14px; height: 14px;"></i> Display Name
+                            <span class="label-inline"><i data-lucide="user"></i> Display Name</span>
                         </label>
                         <input type="text" id="profile-display-name" required placeholder="e.g. Teacher Maria" class="form-control">
                     </div>
 
                     <div class="input-group">
                         <label>
-                            <i data-lucide="image" style="width: 14px; height: 14px;"></i> Change Profile Picture
+                            <span class="label-inline"><i data-lucide="image"></i> Change Profile Picture</span>
                         </label>
                         <div class="custom-file-upload">
                             <label for="profile-image-file" class="file-select-btn">
@@ -286,7 +378,6 @@
 
                 <div class="profile-section-divider"></div>
 
-                <!-- Section 2: Data Management (Backup & Restore) -->
                 <div class="profile-extra-section">
                     <div class="extra-section-header">
                         <div class="extra-icon-box">
@@ -294,7 +385,7 @@
                         </div>
                         <div>
                             <h4>Data Management</h4>
-                            <p>Export a backup file of your students and attendance logs, or restore from a previously saved JSON backup file.</p>
+                            <p>Download a complete JSON backup of your sections, students, and attendance logs, or restore from a saved backup.</p>
                         </div>
                     </div>
 
@@ -303,7 +394,7 @@
                             <i data-lucide="download"></i>
                             <span>Backup Data</span>
                         </button>
-                        
+
                         <label class="btn btn-secondary backup-action-btn custom-restore-btn">
                             <i data-lucide="upload"></i>
                             <span>Restore Data</span>
@@ -315,21 +406,22 @@
         </div>
     </div>
 
-    <!-- Modal: Attendance History -->
+    <!-- Modal: Interactive Attendance History Calendar -->
     <div id="modal-attendance-history" class="modal-backdrop hidden">
-        <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-content" style="max-width: 540px;">
             <div class="modal-header">
                 <div>
                     <h3 id="history-student-name">Student History</h3>
-                    <p id="history-student-info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;"></p>
+                    <p id="history-student-info" class="modal-subtext"></p>
                 </div>
                 <button onclick="closeModal('modal-attendance-history')" class="close-btn"><i data-lucide="x"></i></button>
             </div>
 
             <div class="history-month-nav">
-                <button onclick="changeHistoryMonth(-1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 30px;"><i data-lucide="chevron-left"></i></button>
+                <button onclick="changeHistoryMonth(-1)" class="btn btn-secondary btn-sm"><i data-lucide="chevron-left"></i></button>
                 <span id="history-month-label" style="font-weight: 700; font-size: 13px;">Month Year</span>
-                <button onclick="changeHistoryMonth(1)" class="btn btn-secondary" style="padding: 4px 10px; min-height: 30px;"><i data-lucide="chevron-right"></i></button>
+                <select id="history-subject-select" onchange="renderHistoryCalendar()" class="form-control" style="width: auto; min-height: 32px; padding: 4px 8px; font-size: 12px;"></select>
+                <button onclick="changeHistoryMonth(1)" class="btn btn-secondary btn-sm"><i data-lucide="chevron-right"></i></button>
             </div>
 
             <div class="calendar-container">
@@ -337,6 +429,18 @@
                     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
                 <div id="calendar-grid-body" class="calendar-grid"></div>
+            </div>
+
+            <!-- Inline Day Editor when clicking any date cell -->
+            <div id="history-day-editor" class="history-editor-box">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <strong id="history-selected-date-label" style="font-size: 12.5px;">Click any day above to edit status or note</strong>
+                    <div id="history-day-buttons" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
+                </div>
+                <div id="history-remark-row" class="hidden" style="display: flex; gap: 6px;">
+                    <input type="text" id="history-day-remark" list="remarks-presets" class="remark-input" placeholder="Optional note / excuse reason...">
+                    <button type="button" onclick="saveHistoryDayRemark()" class="btn btn-primary btn-sm">Save Note</button>
+                </div>
             </div>
 
             <div id="history-stats-summary" class="history-stats"></div>
@@ -347,7 +451,7 @@
         </div>
     </div>
 
-    <!-- Modal: Add Section -->
+    <!-- Modal: Add / Edit Section -->
     <div id="modal-section" class="modal-backdrop hidden">
         <div class="modal-content modal-sm">
             <div class="modal-header">
@@ -356,18 +460,26 @@
             </div>
             <form onsubmit="handleSectionSubmit(event)" class="modal-form">
                 <div class="input-group">
-                    <label>Section Name</label>
+                    <label for="new-section-name"><span class="label-inline">Section Name</span></label>
                     <input type="text" id="new-section-name" required placeholder="e.g. Grade 11 - STEM" class="form-control">
+                </div>
+                <div class="input-group">
+                    <label for="section-start-time"><span class="label-inline">Class Start Time (Optional — Auto-Late for QR Scan)</span></label>
+                    <input type="time" id="section-start-time" class="form-control">
+                </div>
+                <div class="input-group">
+                    <label for="section-subjects"><span class="label-inline">Subjects / Schedules (Comma-separated)</span></label>
+                    <input type="text" id="section-subjects" placeholder="General, Mathematics, Science" class="form-control">
                 </div>
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-section')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Section</button>
+                    <button type="submit" class="btn btn-primary">Save Section</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Modal: Add/Edit Student -->
+    <!-- Modal: Add / Edit Student -->
     <div id="modal-student" class="modal-backdrop hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -377,28 +489,183 @@
             <form id="form-student" onsubmit="handleStudentSubmit(event)" class="modal-form">
                 <input type="hidden" id="student-edit-id">
                 <div class="input-group">
-                    <label>Full Name</label>
-                    <input type="text" id="stud-name" required placeholder="e.g. Juan Dela Cruz" class="form-control">
+                    <label for="stud-name"><span class="label-inline">Full Name (Last Name, First Name recommended for SF2)</span></label>
+                    <input type="text" id="stud-name" required placeholder="e.g. Dela Cruz, Juan" class="form-control">
                 </div>
                 <div class="grid-2">
                     <div class="input-group">
-                        <label>Student ID</label>
+                        <label for="stud-id"><span class="label-inline">Student ID / LRN</span></label>
                         <input type="text" id="stud-id" required placeholder="e.g. 2026-0001" class="form-control">
                     </div>
                     <div class="input-group">
-                        <label>Section</label>
+                        <label for="stud-section"><span class="label-inline">Section</span></label>
                         <select id="stud-section" class="form-control"></select>
                     </div>
                 </div>
-                <div class="input-group">
-                    <label>Email Address</label>
-                    <input type="email" id="stud-email" placeholder="student@example.com" class="form-control">
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label for="stud-gender"><span class="label-inline">Gender (For SF2 Grouping)</span></label>
+                        <select id="stud-gender" class="form-control">
+                            <option value="">-- Unspecified --</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="stud-email"><span class="label-inline">Student / Guardian Email</span></label>
+                        <input type="email" id="stud-email" placeholder="parent@example.com" class="form-control">
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-student')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Student</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: Bulk CSV / Excel / Paste Import -->
+    <div id="modal-import-students" class="modal-backdrop hidden">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <div>
+                    <h3>Bulk Import Students</h3>
+                    <p class="modal-subtext">Upload a .csv / .xlsx spreadsheet or paste rows directly from Excel / Google Sheets</p>
+                </div>
+                <button onclick="closeModal('modal-import-students')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="grid-2">
+                <div class="input-group">
+                    <label for="import-default-section"><span class="label-inline">Default Section (if row has none)</span></label>
+                    <input type="text" id="import-default-section" placeholder="e.g. Grade 11 - STEM" class="form-control">
+                </div>
+                <div class="input-group">
+                    <label><span class="label-inline">Sample Spreadsheet Format</span></label>
+                    <button type="button" onclick="downloadSampleTemplateCSV()" class="btn btn-secondary" style="width: 100%;">
+                        <i data-lucide="download"></i> Download Sample CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="import-sheet-file"><span class="label-inline">Option 1: Upload .CSV or .XLSX File</span></label>
+                <input type="file" id="import-sheet-file" accept=".csv,.xlsx,.xls,.txt,.tsv" onchange="handleSpreadsheetFileSelect(event)" class="form-control">
+            </div>
+
+            <div class="input-group">
+                <label for="import-paste-text"><span class="label-inline">Option 2: Paste Columns (Student ID, Name, Gender, Section, Email)</span></label>
+                <textarea id="import-paste-text" rows="4" oninput="previewPasteImport()" class="form-control" style="font-family: ui-monospace, monospace; font-size: 12px;" placeholder="2026-0001&#9;Dela Cruz, Juan&#9;Male&#9;Grade 11 - STEM&#9;juan@example.com&#10;2026-0002&#9;Santos, Maria&#9;Female&#9;Grade 11 - STEM&#9;maria@example.com"></textarea>
+            </div>
+
+            <div>
+                <p id="import-preview-summary" style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">0 students parsed</p>
+                <div class="import-preview-box">
+                    <table class="data-table" style="min-width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Student ID</th>
+                                <th>Name</th>
+                                <th>Gender</th>
+                                <th>Section</th>
+                            </tr>
+                        </thead>
+                        <tbody id="import-preview-body">
+                            <tr><td colspan="4" class="text-center" style="padding: 14px; color: var(--text-muted);">Upload a file or paste rows above to preview</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-import-students')" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="confirm-import-btn" onclick="commitBulkImport()" class="btn btn-primary" disabled>
+                    <i data-lucide="check"></i> Import Students
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Live QR Attendance Scanner -->
+    <div id="modal-qr-scanner" class="modal-backdrop hidden">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <div>
+                    <h3>QR Code Attendance Scanner</h3>
+                    <p id="qr-scanner-context" class="modal-subtext">Scanning marks students Present or Late automatically</p>
+                </div>
+                <button onclick="closeQrScannerModal()" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="qr-viewport-box">
+                <video id="qr-video" playsinline muted></video>
+                <canvas id="qr-canvas" class="hidden"></canvas>
+                <div class="qr-reticle"></div>
+                <div id="qr-camera-placeholder" class="qr-placeholder-msg">Starting camera... If unavailable, upload a QR image or use a USB/keyboard scanner below.</div>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <button type="button" onclick="startQrCamera()" class="btn btn-secondary btn-sm"><i data-lucide="camera"></i> Start Camera</button>
+                <button type="button" onclick="flipQrCamera()" class="btn btn-secondary btn-sm"><i data-lucide="refresh-cw"></i> Flip Camera</button>
+                <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
+                    <i data-lucide="image"></i> Scan Image File
+                    <input type="file" id="qr-file-input" accept="image/*" onchange="scanQrFromImageFile(event)" class="sr-only-input">
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; margin-left: auto; cursor: pointer;">
+                    <input type="checkbox" id="qr-sound-toggle" checked> Sound Beep
+                </label>
+            </div>
+
+            <div class="grid-2">
+                <div class="input-group">
+                    <label for="qr-scan-mode"><span class="label-inline">Status Rule</span></label>
+                    <select id="qr-scan-mode" class="form-control">
+                        <option value="auto">Auto (Late after Cutoff Time)</option>
+                        <option value="Present">Always Mark Present</option>
+                        <option value="Late">Always Mark Late</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="qr-cutoff-time"><span class="label-inline">Class Start Cutoff Time</span></label>
+                    <input type="time" id="qr-cutoff-time" onchange="saveQrCutoffForSection()" class="form-control" value="07:30">
+                </div>
+            </div>
+
+            <form onsubmit="handleManualQrSubmit(event)" style="display: flex; gap: 8px;">
+                <input type="text" id="qr-manual-code" class="form-control" placeholder="USB Scanner / Type Student ID &amp; press Enter...">
+                <button type="submit" class="btn btn-primary">Record</button>
+            </form>
+
+            <div>
+                <p style="font-size: 11.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Recent Scans</p>
+                <div id="qr-recent-scans" class="qr-recent-list">
+                    <span style="color: var(--text-muted);">Waiting for first QR scan...</span>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" onclick="closeQrScannerModal()" class="btn btn-secondary">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Single Student QR ID Card -->
+    <div id="modal-student-qr" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>Student QR ID Card</h3>
+                <button onclick="closeModal('modal-student-qr')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div class="qr-id-card-preview">
+                <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">SCHOLOG ATTENDANCE ID</span>
+                <img id="single-qr-img" src="" alt="Student QR Code">
+                <strong id="single-qr-name" style="font-size: 16px;">Student Name</strong>
+                <span id="single-qr-meta" style="font-size: 12px; color: #475569; font-family: ui-monospace, monospace;">ID • Section</span>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="downloadSingleStudentQr()" class="btn btn-secondary">Download PNG</button>
+                <button type="button" onclick="downloadSingleStudentQrPdf()" class="btn btn-primary">Download PDF Card</button>
+            </div>
         </div>
     </div>
 
@@ -412,11 +679,11 @@
             <form onsubmit="handleTransferSubmit(event)" class="modal-form">
                 <input type="hidden" id="transfer-student-id">
                 <div class="input-group">
-                    <label>Student Name</label>
+                    <label><span class="label-inline">Student Name</span></label>
                     <input type="text" id="transfer-student-name" readonly disabled class="form-control">
                 </div>
                 <div class="input-group">
-                    <label>Target Section</label>
+                    <label for="transfer-new-section"><span class="label-inline">Target Section</span></label>
                     <select id="transfer-new-section" class="form-control"></select>
                 </div>
                 <div class="modal-footer">
@@ -439,7 +706,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" onclick="closeModal('modal-delete-section')" class="btn btn-secondary">Cancel</button>
-                <button type="button" id="confirm-delete-section-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete Section</button>
+                <button type="button" id="confirm-delete-section-btn" class="btn btn-danger">Delete Section</button>
             </div>
         </div>
     </div>
@@ -456,7 +723,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" onclick="closeModal('modal-delete-student')" class="btn btn-secondary">Cancel</button>
-                <button type="button" id="confirm-delete-btn" class="btn" style="background-color: var(--rose-text); color: white;">Delete Student</button>
+                <button type="button" id="confirm-delete-btn" class="btn btn-danger">Delete Student</button>
             </div>
         </div>
     </div>

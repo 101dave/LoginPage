@@ -1,35 +1,89 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Self-hosted Plus Jakarta Sans Variable Font (Offline-Ready) */
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 200 800;
+    src: url('./vendor/fonts/plus-jakarta-sans-latin-ext.woff2') format('woff2-variations'),
+         url('./vendor/fonts/plus-jakarta-sans-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 200 800;
+    src: url('./vendor/fonts/plus-jakarta-sans-latin.woff2') format('woff2-variations'),
+         url('./vendor/fonts/plus-jakarta-sans-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
     --primary: #0f172a;
     --primary-hover: #1e293b;
+    --primary-text: #ffffff;
     --primary-light: #f0fdf4;
-    --primary-ring: rgba(15, 23, 42, 0.12);
-    
+    --primary-ring: rgba(15, 23, 42, 0.14);
+
     --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     --surface: #ffffff;
-    
+    --surface-muted: #f1f5f9;
+    --input-bg: #ffffff;
+
     --text-main: #0f172a;
-    --text-muted: #64748b;
+    --text-muted: #475569;
     --text-subtle: #94a3b8;
-    
-    --border-color: #e2e8f0;
+
+    --border-color: #cbd5e1;
     --border-focus: #0f172a;
-    
+
+    --success-bg: #f0fdf4;
+    --success-text: #166534;
+    --success-border: #bbf7d0;
+
     --error-bg: #fff1f2;
     --error-text: #9f1239;
     --error-border: #fecdd3;
-    
+
     --radius-sm: 8px;
     --radius-lg: 16px;
-    --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="dark"] {
+    --primary: #38bdf8;
+    --primary-hover: #7dd3fc;
+    --primary-text: #0f172a;
+    --primary-light: rgba(22, 101, 52, 0.28);
+    --primary-ring: rgba(56, 189, 248, 0.22);
+
+    --bg-gradient: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+    --surface: #0f172a;
+    --surface-muted: #1e293b;
+    --input-bg: #020617;
+
+    --text-main: #f8fafc;
+    --text-muted: #cbd5e1;
+    --text-subtle: #64748b;
+
+    --border-color: #334155;
+    --border-focus: #38bdf8;
+
+    --success-bg: rgba(22, 101, 52, 0.3);
+    --success-text: #86efac;
+    --success-border: #166534;
+
+    --error-bg: rgba(159, 18, 57, 0.3);
+    --error-text: #fda4af;
+    --error-border: #9f1239;
 }
 
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
 
 body {
@@ -40,35 +94,60 @@ body {
     min-height: 100vh;
     color: var(--text-main);
     -webkit-font-smoothing: antialiased;
+    padding: 1rem 0;
 }
 
 .hidden {
     display: none !important;
 }
 
+.theme-floating-btn {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--surface);
+    color: var(--text-main);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transition: var(--transition);
+    z-index: 20;
+}
+
+.theme-floating-btn:hover {
+    background: var(--surface-muted);
+    transform: translateY(-1px);
+}
+
 .container {
     width: 100%;
-    max-width: 440px;
+    max-width: 448px;
     padding: 1.25rem;
 }
 
 .card {
     background: var(--surface);
-    padding: 2.5rem 2rem;
+    padding: 2.25rem 2rem;
     border-radius: var(--radius-lg);
-    box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+    box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
     border: 1px solid var(--border-color);
 }
 
 .card-header {
-    margin-bottom: 1.75rem;
+    margin-bottom: 1.5rem;
     text-align: center;
 }
 
 .brand-logo-wrapper {
     display: flex;
     justify-content: center;
-    margin-bottom: 1rem;
+    margin-bottom: 0.875rem;
 }
 
 .brand-logo-img {
@@ -76,6 +155,8 @@ body {
     width: auto;
     object-fit: contain;
     border-radius: var(--radius-sm);
+    background: #ffffff;
+    padding: 3px;
 }
 
 .card-header h2 {
@@ -91,7 +172,50 @@ body {
     color: var(--text-muted);
 }
 
-/* Download App Suggestion Banner sa Ilalim */
+/* Google OAuth Button & Divider */
+.oauth-btn {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    background-color: var(--surface);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.oauth-btn:hover {
+    background-color: var(--surface-muted);
+}
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 1.125rem 0;
+    color: var(--text-subtle);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background-color: var(--border-color);
+}
+
+/* PWA Install Suggestion Banner */
 .install-suggestion-banner {
     margin-top: 1rem;
     background: var(--surface);
@@ -105,7 +229,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 10px;
 }
 
 .install-suggestion-text strong {
@@ -120,15 +244,22 @@ body {
     margin-top: 2px;
 }
 
+.install-actions-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
 .btn-install-suggestion {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 6px 12px;
+    padding: 7px 12px;
     font-size: 0.75rem;
-    font-weight: 600;
-    color: white;
+    font-weight: 700;
+    color: var(--primary-text);
     background-color: var(--primary);
     border: none;
     border-radius: var(--radius-sm);
@@ -141,12 +272,28 @@ body {
     background-color: var(--primary-hover);
 }
 
+.btn-install-dismiss {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.btn-install-dismiss:hover {
+    background: var(--surface-muted);
+    color: var(--text-main);
+}
+
 .tabs {
     display: flex;
-    background: #f1f5f9;
+    background: var(--surface-muted);
     padding: 4px;
     border-radius: var(--radius-sm);
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
     border: 1px solid var(--border-color);
 }
 
@@ -166,7 +313,7 @@ body {
 .tab.active {
     background: var(--surface);
     color: var(--text-main);
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
 }
 
 .form {
@@ -175,7 +322,7 @@ body {
 
 .form.active {
     display: block;
-    animation: fadeIn 0.3s ease-in-out;
+    animation: fadeIn 0.25s ease-in-out;
 }
 
 @keyframes fadeIn {
@@ -191,7 +338,7 @@ body {
 }
 
 .input-group {
-    margin-bottom: 1.25rem;
+    margin-bottom: 1.125rem;
 }
 
 .label-row {
@@ -215,12 +362,6 @@ body {
     color: var(--text-main);
 }
 
-.input-group label svg {
-    width: 14px;
-    height: 14px;
-    color: var(--text-muted);
-}
-
 .input-group input {
     width: 100%;
     padding: 0.75rem 1rem;
@@ -229,9 +370,71 @@ body {
     font-size: 0.9375rem;
     color: var(--text-main);
     outline: none;
-    background: #ffffff;
+    background: var(--input-bg);
     transition: var(--transition);
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+}
+
+.password-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-input-wrapper input {
+    padding-right: 2.75rem;
+}
+
+.password-eye-btn {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.password-eye-btn:hover {
+    color: var(--text-main);
+    background: var(--surface-muted);
+}
+
+/* Password Strength Meter */
+.password-strength-wrap {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.strength-bars {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+}
+
+.strength-bar-seg {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--surface-muted);
+    transition: var(--transition);
+}
+
+.strength-bar-seg.weak { background: #ef4444; }
+.strength-bar-seg.fair { background: #f59e0b; }
+.strength-bar-seg.good { background: #3b82f6; }
+.strength-bar-seg.strong { background: #10b981; }
+
+.strength-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
 }
 
 .input-group input::placeholder {
@@ -268,14 +471,14 @@ body {
     width: 100%;
     padding: 0.75rem 1rem;
     background-color: var(--primary);
-    color: white;
+    color: var(--primary-text);
     border: none;
     border-radius: var(--radius-sm);
     font-size: 0.9375rem;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
     transition: var(--transition);
-    margin-top: 0.75rem;
+    margin-top: 0.5rem;
     box-shadow: 0 2px 4px rgba(15, 23, 42, 0.1);
     display: flex;
     align-items: center;
@@ -300,8 +503,8 @@ body {
     padding: 0.875rem 1rem;
     border-radius: var(--radius-sm);
     font-size: 0.875rem;
-    margin-bottom: 1.25rem;
-    line-height: 1.4;
+    margin-bottom: 1.125rem;
+    line-height: 1.45;
     font-weight: 500;
 }
 
@@ -310,13 +513,37 @@ body {
 }
 
 .alert.success {
-    background-color: #f0fdf4;
-    color: #166534;
-    border: 1px solid #bbf7d0;
+    background-color: var(--success-bg);
+    color: var(--success-text);
+    border: 1px solid var(--success-border);
 }
 
 .alert.error {
     background-color: var(--error-bg);
     color: var(--error-text);
     border: 1px solid var(--error-border);
+}
+
+.auth-footer {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.auth-footer a {
+    color: var(--text-muted);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.auth-footer a:hover {
+    color: var(--text-main);
+    text-decoration: underline;
 }

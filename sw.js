@@ -1,4 +1,4 @@
-const CACHE_NAME = "scholog-shell-v2";
+const CACHE_NAME = "scholog-shell-v3";
 const OFFLINE_FALLBACK = "./index.html";
 const APP_SHELL = [
     "./",
@@ -13,7 +13,16 @@ const APP_SHELL = [
     "./icon-192.png",
     "./icon-512.png",
     "./icon-maskable-512.png",
-    "./SchologLogo.png"
+    "./SchologLogo.png",
+    "./vendor/supabase.min.js",
+    "./vendor/lucide.min.js",
+    "./vendor/jspdf.umd.min.js",
+    "./vendor/jspdf.plugin.autotable.min.js",
+    "./vendor/qrcode.min.js",
+    "./vendor/jsqr.min.js",
+    "./vendor/xlsx.mini.min.js",
+    "./vendor/fonts/plus-jakarta-sans-latin.woff2",
+    "./vendor/fonts/plus-jakarta-sans-latin-ext.woff2"
 ];
 
 self.addEventListener("install", (event) => {
@@ -32,7 +41,7 @@ self.addEventListener("activate", (event) => {
     self.clients.claim();
 });
 
-// Network-first with full offline cache fallback
+// Network-first with complete local cache fallback so offline mode works 100%
 self.addEventListener("fetch", (event) => {
     const req = event.request;
     if (req.method !== "GET") return;
@@ -51,10 +60,11 @@ self.addEventListener("fetch", (event) => {
                 return res;
             })
             .catch(async () => {
-                const cached = await caches.match(req);
+                const cached = await caches.match(req, { ignoreSearch: true });
                 if (cached) return cached;
                 if (req.mode === "navigate") {
-                    return caches.match(OFFLINE_FALLBACK);
+                    const dest = url.pathname.endsWith("main.html") ? "./main.html" : OFFLINE_FALLBACK;
+                    return (await caches.match(dest)) || caches.match(OFFLINE_FALLBACK);
                 }
                 return new Response("Offline", { status: 503, statusText: "Offline" });
             })
