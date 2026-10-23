@@ -93,7 +93,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # 53 UI/PDF/static checks (jsdom, no network)
+npm test                  # 59 UI/PDF/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
@@ -103,6 +103,22 @@ attendance saving and cloud conflict targets, daily PDF content, removal of the
 Monthly SF2 export and dark mode, student QR cards, the standalone check-in page
 (QR scan, typed ID, invalid/closed/expired sessions, host mode, live roster) and
 asset/offline-cache consistency.
+
+## Deploying to Vercel
+
+The app is plain static files — no build step, no environment variables needed
+(the Supabase URL + anon key are embedded in the JS, which is safe: they are the
+public client credentials, protected by Row Level Security).
+
+1. Import the repo in Vercel and keep **Framework Preset: Other**, build command
+   empty, output directory `.` (the repository root).
+2. Deploy. `vercel.json` adds the security headers (CSP, `X-Frame-Options`,
+   `Referrer-Policy`, `Permissions-Policy`), `immutable` caching for `/vendor/*`
+   and `must-revalidate` for HTML + `sw.js`.
+3. Add your production URL to Supabase → Authentication → URL Configuration
+   (`Site URL` + `Redirect URLs`). It is already set to
+   `https://scholog.vercel.app` plus `https://*-*.vercel.app/**` for previews.
+4. Camera check-in needs HTTPS — Vercel gives that automatically.
 
 ## Files
 
@@ -114,4 +130,6 @@ vendor/                               pinned browser libraries (see vendor/READM
 supabase/migrations/                  SQL applied to the Supabase project
 tests/                                node:test suites
 sw.js, manifest.json                  PWA offline cache + install metadata
+vercel.json                           security + caching headers for Vercel
+robots.txt, sitemap.xml               crawl rules / search metadata
 ```

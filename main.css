@@ -50,6 +50,7 @@ body {
     color: var(--text-main);
     line-height: 1.5;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow-x: hidden;
@@ -894,7 +895,7 @@ body.auth-pending {
 .dot-amber { background-color: #f59e0b; }
 .dot-blue { background-color: #3b82f6; }
 
-.status-pill-group { display: inline-flex; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
+.status-pill-group { display: inline-flex; flex-wrap: wrap; max-width: 100%; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
 .status-btn {
     padding: 6px 12px;
     font-size: 12px;
@@ -1406,4 +1407,51 @@ body.auth-pending {
 
 .attendance-note strong {
     color: var(--text-main);
+}
+
+/* ==========================================
+   SMALL / NARROW SCREEN HARDENING
+   ========================================== */
+@media (max-width: 420px) {
+    .nav-container { padding: 0 0.75rem; gap: 8px; }
+    .brand h1 { font-size: 15px; }
+    .brand span { font-size: 10px; }
+    .main-container { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .qr-entry-info { min-width: 0; }
+    .status-btn { padding: 6px 8px; font-size: 11px; }
+    .modal-backdrop { padding: 10px; }
+    .modal-content { padding: 18px; }
+}
+
+/* Long unbroken strings (names, IDs, links) must never widen the layout. */
+.card, .panel, .modal-content, .data-table td, .data-table th,
+.qr-entry-info h3, .qr-entry-info p, .user-name {
+    overflow-wrap: anywhere;
+}
+
+@media (max-height: 620px) {
+    .modal-backdrop { align-items: flex-start; overflow-y: auto; }
+    .modal-content { max-height: none; }
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Touch devices: give the attendance status buttons a comfortable target. */
+@media (hover: none) {
+    .status-btn { min-height: 42px; padding: 8px 12px; }
+    .tab-btn { padding: 9px 14px; }
+}
+
+/* Very narrow phones: the 4-up history stats become 2-up. */
+@media (max-width: 380px) {
+    .history-stats { grid-template-columns: repeat(2, 1fr); }
+    .data-table { min-width: 560px; }
 }

@@ -41,6 +41,7 @@ body {
     background-color: var(--bg-main);
     color: var(--text-main);
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     line-height: 1.5;
@@ -998,3 +999,13 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 .host-scan-note {
     margin-top: 14px;
 }
+
+/* Very small phones + long text safety */
+@media (max-width: 360px) {
+    .scan-header { padding-left: 12px; padding-right: 12px; }
+    .scan-main { padding-left: 10px; padding-right: 10px; }
+    .seg-btn { padding: 10px 8px; font-size: 12px; }
+}
+
+#reader, #reader video, #reader canvas { max-width: 100% !important; }
+.panel, .class-strip, .result-card { overflow-wrap: anywhere; }

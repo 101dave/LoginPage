@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Scope:** `101dave/LoginPage` (the Scholog attendance app), branch `arena/f84174e8-loginpage`
 **Live preview:** `npm run serve` → port 8080
-**Test result:** `npm test` → **52 passing, 0 failing** (1 live-network test skipped; 53 tests total), plus role-based checks run against the production database.
+**Test result:** `npm test` → **58 passing, 0 failing** (1 live-network test skipped; 59 tests total), plus role-based checks run against the production database.
 
 ---
 
@@ -87,7 +87,7 @@ queued.
 ### 3.4 Third-party CDN dependencies (offline/PDF reliability)
 jsPDF, AutoTable, Supabase, Lucide, QR generation and the camera scanner are now
 vendored in `vendor/` (pinned versions, licenses included), so the app and the PDF
-export also work offline. The service worker cache was bumped (`scholog-shell-v5`)
+export also work offline. The service worker cache was bumped (`scholog-shell-v6` in §12)
 so existing installs receive the new code, and the new files were added to the
 offline shell.
 
@@ -343,3 +343,90 @@ available. The QR scanner belongs to **students**, not the teacher.
 - `static`: scanning stays student-only, and the no-class screen/copy exist.
 - Removed the old "teacher's own scanner is not device-limited" test (the teacher
   scanner no longer exists).
+
+---
+
+## 12. Deployment readiness pass (2026-10-23)
+
+Full pre-Vercel audit: features, removals, QR UX, typed-ID check-in, exports,
+performance, accessibility, SEO, security and hosting configuration.
+
+### 12.1 Security — one real hole closed
+
+| Finding | Action |
+|---|---|
+| Legacy `submit_checkin(uuid, text)` was still `EXECUTE`-able by `anon` and never wrote `checkin_events`, so a student could bypass **one phone = one check-in** by calling the RPC directly. | **Dropped.** `supabase/migrations/20261023_lock_down_legacy_checkin.sql` |
+| `open_checkin(text)` was unused dead code exposed to `authenticated`. | **Dropped.** |
+| `anon` held `TRUNCATE / REFERENCES / TRIGGER` on `attendance`, `sections`, `students`. | **Revoked**; `anon` now has **no** table privileges. Students reach data only through `checkin_session_info()` / `checkin_mark()` (both `SECURITY DEFINER` with a pinned `search_path`). |
+| No CSP / `X-Frame-Options` / `Referrer-Policy` / `Permissions-Policy`. | Added in `vercel.json`. CSP: `default-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'self'`; scripts allowed from self only (vendored libs), `connect-src` limited to the Supabase project. |
+
+Verified after the migration: `public` exposes only `checkin_mark` and
+`checkin_session_info`; `anon` has zero table grants; `authenticated` keeps
+`SELECT/INSERT/UPDATE/DELETE` for the teacher dashboard.
+
+> `'unsafe-inline'`/`'unsafe-eval'` remain in the CSP because the app uses inline
+> `onclick` handlers and `html5-qrcode` compiles a small helper at runtime. Input
+> is still escaped everywhere (`esc()`, `jsArg()`, `escapeHtml()`, `escapeAttr()`)
+> and all database access is parameterised.
+
+### 12.2 Responsiveness
+
+| Area | Before | Now |
+|---|---|---|
+| Login card on short screens / on-screen keyboard | `body` was `align-items:center` + `100vh`, so tall forms (signup) were clipped and unreachable | `align-items:flex-start` + `margin:auto` + `100dvh`, page scrolls when needed |
+| Mobile browser chrome | `100vh` | `100dvh` on all three pages |
+| Data tables | `min-width: 620px` inside `.table-responsive` (horizontal scroll) | Unchanged behaviour, 560px on ≤380px screens, sticky-free but fully scrollable |
+| Status buttons (Present/Absent/Late/Excused) | 34 px tall | 42 px on touch devices (`@media (hover:none)`) |
+| Very narrow phones (≤380/420 px) | Nav padding, stat grid and modal padding could get tight | Dedicated rules in `main.css`, `scan.css`, `style.css` |
+| Long names / IDs | Could widen layout | `overflow-wrap: anywhere` on cards, table cells and panels |
+| Camera preview | Could overflow on small phones | `#reader video/canvas { max-width:100% }` |
+| Reduced motion | Ignored | `prefers-reduced-motion` disables animations |
+
+### 12.3 Performance
+
+| Change | Effect |
+|---|---|
+| `SchologLogo.png` re-encoded (1254 px → 256 px) | **1.1 MB → 46 KB** on all four pages |
+| `icon-512.png` / `icon-maskable-512.png` palette-optimised | 201 KB → 8.7 KB / 118 KB → 75 KB |
+| jsPDF + AutoTable no longer load on page load | **−400 KB** on the dashboard; fetched on first PDF export (`loadPdfLibraries()`), still cached by the service worker |
+| Vendor scripts moved out of `<head>` | No render-blocking scripts on `index.html`, `main.html`, `scan.html` |
+| `vercel.json` caching | `/vendor/*` → `max-age=31536000, immutable`; HTML and `sw.js` → `must-revalidate` |
+| Logo `<img>` | Explicit `width`/`height` + `decoding="async"` (no layout shift) |
+| Service worker cache | Bumped to `scholog-shell-v6` so previously installed PWAs drop the old logo/CSS |
+
+Remaining known weight: `lucide.min.js` 352 KB and `html5-qrcode.min.js` 368 KB
+are vendored unminified-by-us upstream builds. They are now deferred to the end
+of the body, and the scanner bundle only ships on `scan.html`.
+
+### 12.4 Accessibility
+
+- `index.html` had **no `<h1>` and no landmarks**: now `<h1 id="authCardTitle">` plus a `<main>` landmark.
+- All 8 dashboard modals are now `role="dialog" aria-modal="true" aria-label="…"`; Escape closes them and focus moves into the dialog on open and back to the trigger on close (`openModal`/`closeModal` in `main.js`).
+- Hamburger menu exposes `aria-label`, `aria-expanded` and `aria-controls`.
+- `style.css` had **no `:focus-visible`** style: added, plus visible focus on all interactive elements.
+- Placeholder colour `#94a3b8` was **2.56:1** on white (fails WCAG AA): now `#64748b` (**4.76:1**). Every other measured pair passes AA (body text 17.9:1, muted 7.6:1, error text 7.3:1).
+- Every page now has a language attribute, an `h1`, and alt text on all images.
+
+### 12.5 SEO / metadata
+
+- All four pages have a unique `<title>` and a `<meta name="description">`.
+- Open Graph + Twitter card tags on `index.html`, `main.html`, `scan.html`, `privacy.html`.
+- Canonical URL on the public pages; `main.html`/`scan.html` are `noindex` (authenticated and per-class links).
+- `robots.txt` (allows the site, disallows the dashboard and check-in page, points at the sitemap) and `sitemap.xml` added.
+
+### 12.6 Hosting
+
+`vercel.json` covers headers, caching and clean behaviour for a pure static
+deploy. No build step and no environment variables are required; Supabase keys
+in the bundle are the public anon key, guarded by RLS.
+
+### 12.7 New tests (6 added, 59 total)
+
+| Test | Covers |
+|---|---|
+| `deployment hardening: Vercel headers, robots and sitemap are in place` | CSP + security headers, `immutable` vendor caching, robots/sitemap |
+| `SEO and accessibility basics on every page` | description, lang, `h1`, alt text, `<main>`, OG/Twitter, 8 labelled dialogs |
+| `images are optimised for the web` | logo/icons stay under 120 KB |
+| `the heavy PDF libraries load on demand, not on every page view` | no eager jsPDF, no external scripts in `<head>` |
+| `dialogs open with focus inside and close with Escape` | dialog a11y + keyboard |
+| `the mobile menu toggle keeps aria-expanded in sync` | menu a11y |
