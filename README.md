@@ -21,20 +21,33 @@ Security, cached locally for offline use, and synced automatically when back onl
    per student, *All Present*, then **Save**. **Daily PDF** downloads
    `Daily_Attendance_<section>_<date>.pdf` with the roster, statuses and summary.
 2. **Student self check-in (QR / Student ID):**
-   1. Teacher opens **Open QR Check-In** (attendance view) — it opens `scan.html` in a
-      new tab, never inside the dashboard.
-   2. Teacher picks the section + date and taps *Create check-in QR*. A QR code and
-      share link (`scan.html?t=<session token>`) appear, plus a live roster.
-   3. Students open that link/QR on their own devices — **no login needed**. They scan
-      the QR code printed from *Class List → QR*, or type their Student ID.
+   1. Teacher opens **Start QR Check-In** (attendance view) — `scan.html` opens in a new
+      tab, already pre-filled with the section and date on screen. The scanner is never
+      inside the dashboard itself.
+   2. Teacher taps *Create check-in QR*. A QR code, share link
+      (`scan.html?t=<session token>`) and live roster appear. **Present on screen**
+      projects a big full-screen QR for the classroom; **Copy** / **Share** sends the
+      link to a group chat. The setup form hides itself once the session exists.
+   3. Students open that link/QR on their own devices — **no login needed**. The page
+      has two clear tabs: **Scan QR** (camera starts automatically; after each
+      check-in it re-arms for the next student) and **Type ID** for anyone without a
+      QR card.
    4. The ID is validated against that section's class list on the server, then a
-      Present record is written for the session date.
+      Present record is written for the session date. The result takes over the screen
+      with a big confirmation, the student's name and the running count.
    5. The dashboard refreshes automatically (and via **Refresh**) so check-ins show up
       in the attendance sheet and the daily PDF.
 
 Student QR cards are generated in **Class List → QR** and can be printed. The payload
 is `SCHOLOG:<student-id>`; the check-in page also accepts raw IDs, `?id=<student-id>`
 links and JSON payloads.
+
+### Check-in page UX at a glance
+
+| Who | What they see |
+| --- | --- |
+| Student | Class + date + progress, then a **Scan QR / Type ID** switch, auto-starting camera, big green confirmation, "Scan next student", a "Checked in here" list, and a collapsible 3-step help panel |
+| Teacher | A **1-2-3** flow: choose class → share the QR/link → watch the live roster; projection mode, copy/share, refresh, new session and end check-in are always one tap away |
 
 ## Backend
 
@@ -62,7 +75,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # 39 UI/PDF/static checks (jsdom, no network)
+npm test                  # 46 UI/PDF/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 

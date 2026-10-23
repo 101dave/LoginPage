@@ -105,9 +105,150 @@ test("typing a valid Student ID marks the student present", async (t) => {
     assert.equal(mark.body.p_token, TOKEN);
     assert.equal(mark.body.p_student_id, "2026-0002");
 
-    assert.match(document.getElementById("result-title").textContent, /marked Present/i);
+    assert.match(document.getElementById("result-title").textContent, /you're Present/i);
     assert.match(document.getElementById("result-text").textContent, /Ana Santos \(2026-0002\)/);
     assert.equal(document.getElementById("session-count").textContent, "2 / 3 checked in");
+});
+
+test("students get one clear choice at a time: Scan QR vs Type ID", async (t) => {
+    const { window, dom } = bootScan();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+
+    const scanTab = document.getElementById("tab-scan");
+    const idTab = document.getElementById("tab-id");
+    assert.ok(scanTab.classList.contains("active"));
+    assert.equal(scanTab.getAttribute("aria-selected"), "true");
+    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), false);
+    assert.equal(document.getElementById("panel-id").classList.contains("hidden"), true);
+
+    // Type ID tab reveals only the manual form and focuses the input.
+    idTab.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.ok(idTab.classList.contains("active"));
+    assert.equal(scanTab.getAttribute("aria-selected"), "false");
+    assert.equal(document.getElementById("panel-id").classList.contains("hidden"), false);
+    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), true);
+
+    // "I have a QR code instead" jumps back to the scanner.
+    document.getElementById("id-use-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.ok(scanTab.classList.contains("active"));
+    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), false);
+
+    // "I don't have a QR code" jumps to typing.
+    document.getElementById("scan-use-id-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.ok(idTab.classList.contains("active"));
+});
+
+test("camera starts automatically on the scan tab so students just point and scan", async (t) => {
+    const { window, dom } = bootScan();
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+    await waitFor(() => camera.started === 1, { label: "camera auto-start" });
+    assert.ok(document.getElementById("scan-stage").classList.contains("is-live"), "live stage marker");
+    assert.equal(document.getElementById("startScanBtn").classList.contains("hidden"), true, "manual button hidden while live");
+    assert.equal(document.getElementById("stopScanBtn").classList.contains("hidden"), false);
+    assert.match(document.getElementById("camera-hint").textContent, /Camera on/i);
+});
+
+test("a successful check-in shows a big result, remembers it and re-arms the camera", async (t) => {
+    const { window, dom, fetchCalls } = bootScan();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+    await waitFor(() => camera.started >= 1, { label: "camera ready" });
+
+    document.getElementById("student-id-input").value = "2026-0002";
+    document.getElementById("id-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => !document.getElementById("result").classList.contains("hidden"), { label: "result" });
+    // One clear message: the tabs and forms step out of the way.
+    assert.equal(document.querySelector(".segmented").classList.contains("hidden"), true);
+    assert.equal(document.getElementById("panel-id").classList.contains("hidden"), true);
+
+    // The check-in is remembered for this device.
+    assert.equal(document.getElementById("recent").classList.contains("hidden"), false);
+    assert.match(document.getElementById("recent-list").textContent, /Ana Santos/);
+
+    // "Scan next student" returns to the scanner and restarts the camera.
+    const startedBefore = camera.started;
+    document.getElementById("result-again").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitFor(() => document.getElementById("result").classList.contains("hidden"), { label: "result closed" });
+    await waitFor(() => camera.started > startedBefore, { label: "camera restarted" });
+    assert.equal(document.getElementById("panel-scan").classList.contains("hidden"), false);
+    assert.ok(fetchCalls.some((call) => call.fn === "checkin_mark"));
+});
+
+test("host page opens pre-filled from the dashboard link", async (t) => {
+    const db = defaultDb();
+    const { window, dom } = bootScan({
+        url: `https://scholog.test/scan.html?section=${encodeURIComponent("Grade 11 - ABM")}&date=${todayStr()}`,
+        session: userSession(),
+        db
+    });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"), { label: "host view" });
+    await waitFor(() => document.getElementById("host-section").options.length === 2, { label: "sections" });
+    assert.equal(document.getElementById("host-section").value, "Grade 11 - ABM");
+    assert.equal(document.getElementById("host-date").value, todayStr());
+    // The create form is the only thing on screen until a session exists.
+    assert.equal(document.getElementById("host-start-panel").classList.contains("hidden"), false);
+    assert.equal(document.getElementById("host-session").classList.contains("hidden"), true);
+});
+
+test("host can project a full-screen check-in code for the class", async (t) => {
+    const { window, dom } = bootScan({ url: "https://scholog.test/scan.html", session: userSession(), db: defaultDb() });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"));
+    await waitFor(() => document.getElementById("host-section").options.length === 2);
+    document.getElementById("host-section").value = "Grade 11 - STEM";
+    document.getElementById("session-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => !document.getElementById("host-session").classList.contains("hidden"));
+
+    assert.equal(document.getElementById("presentation").classList.contains("hidden"), true);
+    document.getElementById("present-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    const overlay = document.getElementById("presentation");
+    assert.equal(overlay.classList.contains("hidden"), false, "projection overlay visible");
+    assert.equal(document.body.style.overflow, "hidden", "page scroll locked");
+    assert.ok(document.querySelector("#presentation-qr svg"), "big QR rendered");
+    assert.equal(document.getElementById("presentation-title").textContent, "Grade 11 - STEM");
+    assert.equal(document.getElementById("presentation-checked").textContent, "2");
+
+    document.getElementById("presentation-exit").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(overlay.classList.contains("hidden"), true);
+    assert.equal(document.body.style.overflow, "");
+
+    // Escape also closes it.
+    document.getElementById("present-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(overlay.classList.contains("hidden"), true);
+});
+
+test("host flow hides the setup form once a session exists", async (t) => {
+    const { window, dom } = bootScan({ url: "https://scholog.test/scan.html", session: userSession(), db: defaultDb() });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"));
+    await waitFor(() => document.getElementById("host-section").options.length === 2);
+    document.getElementById("session-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => !document.getElementById("host-session").classList.contains("hidden"));
+
+    assert.equal(document.getElementById("host-start-panel").classList.contains("hidden"), true, "setup form hidden");
+    assert.equal(document.getElementById("host-session").classList.contains("hidden"), false);
+
+    // "New session" brings the setup form back and clears the shared link.
+    document.getElementById("new-session-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(document.getElementById("host-start-panel").classList.contains("hidden"), false);
+    assert.equal(document.getElementById("host-session").classList.contains("hidden"), true);
+    assert.equal(document.getElementById("session-link").value, "");
 });
 
 test("an ID that is not on the class list is rejected", async (t) => {
@@ -173,7 +314,7 @@ test("scanning a student QR code extracts the ID and checks in", async (t) => {
     const mark = fetchCalls.find((call) => call.fn === "checkin_mark");
     assert.equal(mark.body.p_student_id, "2026-0003");
     await waitFor(() => !document.getElementById("result").classList.contains("hidden"));
-    assert.match(document.getElementById("result-title").textContent, /marked Present/i);
+    assert.match(document.getElementById("result-title").textContent, /you're Present/i);
 });
 
 test("printed student QR cards (SCHOLOG:ID) check in by scanned ID", async (t) => {

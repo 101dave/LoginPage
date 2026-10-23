@@ -1014,7 +1014,14 @@ function exportAttendanceToPDF() {
 let lastCloudSyncAt = 0;
 
 function openQrCheckInPage() {
-    window.open("scan.html", "_blank", "noopener");
+    // Carry the section/date the teacher is already looking at so the
+    // check-in page opens ready to go (no re-selecting anything).
+    const section = document.getElementById("att-section")?.value || "";
+    const date = document.getElementById("att-date")?.value || "";
+    const url = new URL("scan.html", window.location.href);
+    if (section) url.searchParams.set("section", section);
+    if (date && isValidDateStr(date)) url.searchParams.set("date", date);
+    window.open(url.href, "_blank", "noopener");
 }
 
 // Pull the newest data from Supabase without clobbering queued offline changes

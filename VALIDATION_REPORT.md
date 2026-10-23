@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Scope:** `101dave/LoginPage` (the Scholog attendance app), branch `arena/f84174e8-loginpage`
 **Live preview:** `npm run serve` → port 8080
-**Test result:** `npm test` → **39 passing, 0 failing** (1 live-network test skipped), plus role-based checks run against the production database.
+**Test result:** `npm test` → **46 passing, 0 failing** (1 live-network test skipped), plus role-based checks run against the production database.
 
 ---
 
@@ -218,3 +218,40 @@ Manual smoke test:
   functions.
 - The live integration test in `tests/integration.test.mjs` is skipped by default
   because it needs outbound network access to Supabase.
+
+---
+
+## 9. Follow-up: QR check-in usability pass
+
+After the first release, the check-in page was reworked for clarity and easier
+navigation (no behaviour change to the underlying RPCs).
+
+**Student page**
+- Class header now shows section, date (with "Today ·"), open/closed badge and a
+  progress bar with "`n` / `total` checked in" — students immediately see where
+  they are.
+- Replaced the two stacked forms with a **Scan QR / Type ID** segmented control
+  (proper `role="tablist"`, arrow-key navigation) so only one option is on screen.
+- The camera **starts automatically** when the scan tab opens; a blocked camera
+  shows a plain-language message and switches to the typed-ID tab.
+- A successful check-in takes over the screen: big green confirmation with the
+  student's first name, an "Already checked in" variant, and the running count.
+- **Scan next student** re-arms the camera (the camera also restarts on its own
+  after ~2.5 s with a visible countdown for queues; typing never auto-restarts).
+- "Checked in here" chips remember the last 5 check-ins on that device, and a
+  collapsible "How do I check in?" explains the 3 steps.
+
+**Teacher page**
+- Clear 1-2-3 flow: **choose a class → share the QR/link → live roster**. The
+  setup form hides itself once a session exists and returns via *New session*.
+- Opening from the dashboard **pre-fills the section and date** already selected in
+  the attendance view (`scan.html?section=…&date=…`).
+- New **Present on screen** projection mode: full-screen QR, class name, live
+  checked-in count, copy-link and Exit (Esc also closes).
+- **Copy** and native **Share** buttons, a friendlier empty/closed state, and
+  "Updated 10:42" on the roster.
+
+**Tests added** (7): tab switching/one-thing-at-a-time, automatic camera start,
+result + recent list + camera re-arm, dashboard prefill, projection mode
+open/close/Esc, setup-vs-session panel switching, and the launcher passing the
+selected section/date. Suite is now **46 passing, 0 failing**.
