@@ -38,43 +38,6 @@
     --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-[data-theme="dark"] {
-    --bg-main: #020617;
-    --bg-card: #0f172a;
-    --bg-navbar: rgba(15, 23, 42, 0.94);
-    --bg-row-hover: #1e293b;
-    --text-main: #f8fafc;
-    --text-muted: #cbd5e1;
-    --border-color: #334155;
-    --border-light: #1e293b;
-    --primary: #38bdf8;
-    --primary-hover: #7dd3fc;
-    --primary-text: #0f172a;
-
-    --emerald-bg: rgba(22, 101, 52, 0.28);
-    --emerald-text: #86efac;
-    --emerald-border: #166534;
-    --status-present-bg: #047857;
-
-    --rose-bg: rgba(159, 18, 57, 0.28);
-    --rose-text: #fda4af;
-    --rose-border: #9f1239;
-    --status-absent-bg: #be123c;
-
-    --amber-bg: rgba(146, 64, 14, 0.3);
-    --amber-text: #fcd34d;
-    --amber-border: #92400e;
-    --status-late-bg: #b45309;
-
-    --blue-bg: rgba(30, 64, 175, 0.3);
-    --blue-text: #93c5fd;
-    --blue-border: #1d4ed8;
-    --status-excused-bg: #1d4ed8;
-
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
-    --shadow-card: 0 6px 24px -4px rgba(0, 0, 0, 0.45);
-}
-
 * {
     box-sizing: border-box;
     margin: 0;
@@ -1284,5 +1247,140 @@ body.auth-pending {
 @media (max-width: 480px) {
     .profile-actions-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+
+/* QR / Student-ID check-in entry card */
+.qr-entry-card {
+    padding: 16px 20px;
+}
+
+.qr-entry-flex {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.qr-entry-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 240px;
+    flex: 1 1 320px;
+}
+
+.qr-entry-info h3 {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.qr-entry-info p {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    max-width: 620px;
+}
+
+.qr-entry-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-main);
+}
+
+.qr-entry-icon i,
+.qr-entry-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.qr-entry-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+
+/* Student QR ID card */
+.student-qr-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 8px 0 4px;
+}
+
+.student-qr-canvas {
+    background: #fff;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 6px;
+    max-width: 100%;
+}
+
+.student-qr-canvas svg {
+    display: block;
+    width: min(220px, 60vw);
+    height: auto;
+}
+
+.student-qr-body h4 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.student-qr-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.student-qr-hint {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    max-width: 280px;
+    margin-top: 4px;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    #modal-student-qr,
+    #modal-student-qr * {
+        visibility: visible;
+    }
+
+    #modal-student-qr {
+        position: absolute;
+        inset: 0;
+        display: block !important;
+        background: #fff;
+        padding: 0;
+    }
+
+    #modal-student-qr .modal-content {
+        box-shadow: none;
+        border: none;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    #modal-student-qr .close-btn,
+    #modal-student-qr .modal-footer {
+        display: none !important;
     }
 }

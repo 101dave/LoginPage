@@ -4,17 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scholog - Attendance Management</title>
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#f8fafc">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+    <!-- Lucide Icons (vendored so the app also works offline) -->
+    <script src="vendor/lucide.min.js"></script>
+    <!-- QR generator (student ID cards) -->
+    <script src="vendor/qrcode.js"></script>
     <!-- Supabase JS SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>    
-    <!-- jsPDF at jsPDF-AutoTable CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="vendor/supabase.js"></script>
+    <!-- jsPDF + AutoTable (daily PDF export) -->
+    <script src="vendor/jspdf.umd.min.js"></script>
+    <script src="vendor/jspdf.autotable.min.js"></script>
+    <script src="pdf.js"></script>
     <!-- Pure CSS -->
     <link rel="stylesheet" href="main.css">
 </head>
@@ -196,7 +199,27 @@
                             <i data-lucide="save"></i> Save
                         </button>
                         <button onclick="exportAttendanceToPDF()" class="btn btn-secondary" style="flex: 1;">
-                            <i data-lucide="file-text"></i> Export PDF
+                            <i data-lucide="file-text"></i> Daily PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card qr-entry-card">
+                <div class="qr-entry-flex">
+                    <div class="qr-entry-info">
+                        <div class="qr-entry-icon"><i data-lucide="qr-code"></i></div>
+                        <div>
+                            <h3>QR &amp; Student ID Check-In</h3>
+                            <p>Opens the separate check-in page. Students scan the class QR on their own phones, or type their Student ID, to mark themselves present.</p>
+                        </div>
+                    </div>
+                    <div class="qr-entry-actions">
+                        <button onclick="refreshAttendanceFromCloud()" class="btn btn-secondary" title="Reload the latest check-ins from the cloud">
+                            <i data-lucide="refresh-cw"></i> Refresh
+                        </button>
+                        <button onclick="openQrCheckInPage()" class="btn btn-primary">
+                            <i data-lucide="external-link"></i> Open QR Check-In
                         </button>
                     </div>
                 </div>
@@ -311,6 +334,31 @@
                         </label>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Student QR ID card -->
+    <div id="modal-student-qr" class="modal-backdrop hidden">
+        <div class="modal-content modal-sm student-qr-modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Student QR Code</h3>
+                    <p class="modal-subtext">Print or show this code so the student can scan it on the check-in page.</p>
+                </div>
+                <button onclick="closeModal('modal-student-qr')" class="close-btn" aria-label="Close"><i data-lucide="x"></i></button>
+            </div>
+            <div class="student-qr-body">
+                <div id="student-qr-canvas" class="student-qr-canvas"></div>
+                <h4 id="student-qr-name">Student Name</h4>
+                <p id="student-qr-code" class="student-qr-id">Student ID</p>
+                <p class="student-qr-hint">No QR code? The student can type this ID on the check-in page instead.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal('modal-student-qr')" class="btn btn-secondary">Close</button>
+                <button type="button" onclick="printStudentQr()" class="btn btn-primary">
+                    <i data-lucide="printer"></i> Print
+                </button>
             </div>
         </div>
     </div>
