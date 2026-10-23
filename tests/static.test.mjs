@@ -57,11 +57,11 @@ test("QR scanning is student-only and a missing session means no class", () => {
     assert.match(scanHtml, /Record manually/);
     assert.match(scanHtml, /for students only/i);
 
-    // No session -> "walang pasok" screen, and the teacher still records by hand.
+    // No session -> "no class" screen, and the teacher still records by hand.
     assert.match(scanHtml, /id="view-noclass"/);
     assert.match(scanJs, /function showNoClass/);
     assert.match(scanJs, /invalid_session/);
-    assert.match(read("main.html"), /Walang QR session = walang pasok/);
+    assert.match(read("main.html"), /No QR session = no class/);
     assert.match(read("main.html"), /manual records never need a QR session/i);
 });
 
@@ -116,6 +116,17 @@ test("Supabase credentials match the shared .env", () => {
         const source = read(file);
         assert.ok(source.includes(env.VITE_SUPABASE_URL), `${file} uses the configured Supabase URL`);
         assert.ok(source.includes(env.VITE_SUPABASE_ANON_KEY), `${file} uses the configured anon key`);
+    }
+});
+
+test("the Take Attendance section is written in English only", () => {
+    const html = read("main.html");
+    const start = html.indexOf('id="view-attendance"');
+    assert.ok(start > -1, "attendance view exists");
+    // The attendance view is the last tab, so it runs to the end of the page.
+    const section = html.slice(start);
+    for (const word of ["walang", "pasok", "piliin", "pindutin", "estudyante", "guro", "kopyahin"]) {
+        assert.doesNotMatch(section, new RegExp(`\\b${word}\\b`, "i"), `no Tagalog " ${word} " in Take Attendance`);
     }
 });
 
