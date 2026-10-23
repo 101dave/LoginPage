@@ -650,7 +650,11 @@ function switchTab(tabName) {
 
 function toggleMobileMenu() {
     const menu = document.getElementById("mobileMenu");
-    if (menu) menu.classList.toggle("hidden");
+    if (!menu) return;
+    const opening = menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !opening);
+    const trigger = document.querySelector(".hamburger-btn");
+    if (trigger) trigger.setAttribute("aria-expanded", String(opening));
 }
 
 async function handleLogout() {
@@ -968,10 +972,46 @@ function currentTeacherLabel() {
     return (currentUser.email || "").split("@")[0];
 }
 
+// jsPDF + AutoTable are ~400 KB and are only needed when a teacher exports a
+// report, so they are fetched on first use instead of on every page load.
+function loadPdfLibraries() {
+    const loadScript = (src) => new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[data-scholog-lib="${src}"]`);
+        if (existing) {
+            if (existing.dataset.loaded === "true") return resolve();
+            existing.addEventListener("load", () => resolve());
+            existing.addEventListener("error", () => reject(new Error(src)));
+            return;
+        }
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = false;
+        script.dataset.schologLib = src;
+        script.addEventListener("load", () => {
+            script.dataset.loaded = "true";
+            resolve();
+        });
+        script.addEventListener("error", () => reject(new Error(src)));
+        document.head.appendChild(script);
+    });
+
+    return loadScript("vendor/jspdf.umd.min.js").then(() => loadScript("vendor/jspdf.autotable.min.js"));
+}
+
 function exportAttendanceToPDF() {
     const jsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!jsPDF) {
-        showToast("PDF library is unavailable. Please refresh the page.", "error");
+        if (window.__pdfLibrariesLoading) return;
+        window.__pdfLibrariesLoading = true;
+        loadPdfLibraries()
+            .then(() => {
+                window.__pdfLibrariesLoading = false;
+                exportAttendanceToPDF();
+            })
+            .catch(() => {
+                window.__pdfLibrariesLoading = false;
+                showToast("Could not load the PDF library. Check your connection and try again.", "error");
+            });
         return;
     }
     if (!window.SchologPdf) {
@@ -1066,8 +1106,43 @@ async function refreshAttendanceFromCloud() {
 }
 
 // --- Modals & Actions ---
-function openModal(id) { document.getElementById(id)?.classList.remove("hidden"); }
-function closeModal(id) { document.getElementById(id)?.classList.add("hidden"); }
+// Dialogs are announced with role="dialog"/aria-modal, so focus must move into
+// them on open and return to the trigger on close for keyboard users.
+let lastFocusedElement = null;
+
+function openModal(id) {
+    const dialog = document.getElementById(id);
+    if (!dialog) return;
+    lastFocusedElement = document.activeElement;
+    dialog.classList.remove("hidden");
+    // Prefer the first real field; fall back to the close button.
+    const focusTarget = dialog.querySelector(
+        "input:not([type='hidden']):not([disabled]), select, textarea"
+    ) || dialog.querySelector(".close-btn");
+    if (focusTarget) setTimeout(() => focusTarget.focus(), 0);
+}
+
+function closeModal(id) {
+    const dialog = document.getElementById(id);
+    if (!dialog) return;
+    dialog.classList.add("hidden");
+    if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+        try { lastFocusedElement.focus(); } catch (_) { /* element is gone */ }
+    }
+    lastFocusedElement = null;
+}
+
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" && event.key !== "Esc") return;
+    const openDialogs = Array.from(document.querySelectorAll(".modal-backdrop:not(.hidden)"));
+    if (!openDialogs.length) return;
+    event.preventDefault();
+    openDialogs.forEach((dialog) => {
+        const closeBtn = dialog.querySelector(".close-btn");
+        if (closeBtn) closeBtn.click();
+        else dialog.classList.add("hidden");
+    });
+});
 
 function openAddSectionModal() {
     const titleEl = document.querySelector("#modal-section h3");

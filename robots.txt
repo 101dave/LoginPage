@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /main.html
+Disallow: /scan.html
+
+Sitemap: https://scholog.vercel.app/sitemap.xml

@@ -4,20 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scholog - Attendance Management</title>
+    <meta name="description" content="Teacher dashboard for Scholog: manage sections and students, mark daily attendance, and export PDF reports.">
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Scholog">
+    <meta property="og:title" content="Scholog - Attendance Management">
+    <meta property="og:description" content="Manage sections, mark daily attendance, and export PDF reports.">
+    <meta property="og:image" content="https://scholog.vercel.app/icon-512.png">
+    <meta name="twitter:card" content="summary">
     <meta name="theme-color" content="#f8fafc">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
-    <!-- Lucide Icons (vendored so the app also works offline) -->
-    <script src="vendor/lucide.min.js"></script>
-    <!-- QR generator (student ID cards) -->
-    <script src="vendor/qrcode.js"></script>
-    <!-- Supabase JS SDK -->
-    <script src="vendor/supabase.js"></script>
-    <!-- jsPDF + AutoTable (daily PDF export) -->
-    <script src="vendor/jspdf.umd.min.js"></script>
-    <script src="vendor/jspdf.autotable.min.js"></script>
-    <script src="pdf.js"></script>
+    <!-- Libraries are loaded at the end of <body> so they never block the
+         first paint. jsPDF is fetched on demand the first time a PDF is
+         exported (see exportAttendanceToPDF in main.js). -->
     <!-- Pure CSS -->
     <link rel="stylesheet" href="main.css">
 </head>
@@ -27,7 +28,7 @@
     <header class="navbar">
         <div class="nav-container">
             <div class="brand">
-                <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img">
+                <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img" width="256" height="256" decoding="async">
                 <div>
                     <h1>Scholog</h1>
                     <span>Attendance</span>
@@ -60,7 +61,7 @@
                     <span>Logout</span>
                 </button>
                 <!-- Hamburger Toggle Button (Mobile Only) -->
-                <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide">
+                <button onclick="toggleMobileMenu()" class="hamburger-btn desktop-hide" aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
                     <i data-lucide="menu"></i>
                 </button>
             </div>
@@ -263,7 +264,7 @@
     </main>
 
     <!-- Modal: Profile Settings & Data Management (Redesigned UI) -->
-    <div id="modal-profile" class="modal-backdrop hidden">
+    <div id="modal-profile" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Profile settings">
         <div class="modal-content profile-modal-content">
             <div class="modal-header">
                 <div>
@@ -345,7 +346,7 @@
     </div>
 
     <!-- Modal: Student QR ID card -->
-    <div id="modal-student-qr" class="modal-backdrop hidden">
+    <div id="modal-student-qr" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Student QR code">
         <div class="modal-content modal-sm student-qr-modal">
             <div class="modal-header">
                 <div>
@@ -370,7 +371,7 @@
     </div>
 
     <!-- Modal: Attendance History -->
-    <div id="modal-attendance-history" class="modal-backdrop hidden">
+    <div id="modal-attendance-history" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Student attendance history">
         <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
                 <div>
@@ -402,7 +403,7 @@
     </div>
 
     <!-- Modal: Add Section -->
-    <div id="modal-section" class="modal-backdrop hidden">
+    <div id="modal-section" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Add section">
         <div class="modal-content modal-sm">
             <div class="modal-header">
                 <h3>Add Section</h3>
@@ -422,7 +423,7 @@
     </div>
 
     <!-- Modal: Add/Edit Student -->
-    <div id="modal-student" class="modal-backdrop hidden">
+    <div id="modal-student" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Add or edit student">
         <div class="modal-content">
             <div class="modal-header">
                 <h3 id="student-modal-title">Add New Student</h3>
@@ -457,7 +458,7 @@
     </div>
 
     <!-- Modal: Transfer Student -->
-    <div id="modal-transfer-student" class="modal-backdrop hidden">
+    <div id="modal-transfer-student" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Move student">
         <div class="modal-content modal-sm">
             <div class="modal-header">
                 <h3>Move Student</h3>
@@ -482,7 +483,7 @@
     </div>
 
     <!-- Modal: Confirm Delete Section -->
-    <div id="modal-delete-section" class="modal-backdrop hidden">
+    <div id="modal-delete-section" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Delete section">
         <div class="modal-content modal-sm">
             <div class="modal-header">
                 <h3 style="color: var(--rose-text);">Delete Section</h3>
@@ -499,7 +500,7 @@
     </div>
 
     <!-- Modal: Confirm Delete Student -->
-    <div id="modal-delete-student" class="modal-backdrop hidden">
+    <div id="modal-delete-student" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Delete student">
         <div class="modal-content modal-sm">
             <div class="modal-header">
                 <h3 style="color: var(--rose-text);">Delete Student</h3>
@@ -515,6 +516,11 @@
         </div>
     </div>
 
+    <!-- Vendored libraries (order matters) -->
+    <script src="vendor/lucide.min.js"></script>
+    <script src="vendor/qrcode.js"></script>
+    <script src="vendor/supabase.js"></script>
+    <script src="pdf.js"></script>
     <script src="main.js"></script>
     <script>
         if ("serviceWorker" in navigator) {

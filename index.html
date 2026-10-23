@@ -4,24 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scholog — Sign In & Account Management</title>
+    <meta name="description" content="Scholog is a free student attendance management system for teachers: class lists, daily attendance, QR check-in and PDF reports.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://scholog.vercel.app/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Scholog">
+    <meta property="og:title" content="Scholog — Attendance Management for Teachers">
+    <meta property="og:description" content="Manage class lists, take daily attendance, share a QR check-in link, and export PDF reports.">
+    <meta property="og:url" content="https://scholog.vercel.app/">
+    <meta property="og:image" content="https://scholog.vercel.app/icon-512.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Scholog — Attendance Management for Teachers">
+    <meta name="twitter:description" content="Class lists, daily attendance, QR check-in and PDF reports in one place.">
+    <meta name="twitter:image" content="https://scholog.vercel.app/icon-512.png">
     <meta name="theme-color" content="#f8fafc">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
-    <!-- Supabase JS SDK (vendored so the app also works offline) -->
-    <script src="vendor/supabase.js"></script>
+    <!-- Supabase JS SDK is loaded at the end of <body> to keep first paint fast. -->
     <!-- Custom Modern Styles -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
+    <main class="container">
         <div class="card">
             <!-- Brand / Header -->
             <div class="card-header">
                 <div class="brand-logo-wrapper">
-                    <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img">
+                    <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img" width="256" height="256" decoding="async">
                 </div>
-                <h2 id="authCardTitle">Welcome to Scholog</h2>
+                <h1 id="authCardTitle">Welcome to Scholog</h1>
                 <p id="authCardSubtitle">Sign in to manage your class attendance</p>
             </div>
 
@@ -118,9 +130,10 @@
                 </button>
             </div>
         </div>
-    </div>
+    </main>
 
-    <!-- Custom logic script -->
+    <!-- Vendored SDK + app logic (order matters) -->
+    <script src="vendor/supabase.js"></script>
     <script src="script.js"></script>
     <script>
         if ("serviceWorker" in navigator) {

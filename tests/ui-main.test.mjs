@@ -365,3 +365,38 @@ test("teacher refreshes attendance to pick up student check-ins", async (t) => {
     assert.ok(active, "refreshed row shows Present");
     assert.ok(client.calls.some((c) => c.table === "attendance" && c.op === "select"));
 });
+
+test("dialogs open with focus inside and close with Escape", async (t) => {
+    const { window, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    const backdrop = document.getElementById("modal-section");
+    assert.ok(backdrop.classList.contains("hidden"), "modal starts hidden");
+    assert.equal(backdrop.getAttribute("role"), "dialog");
+    assert.equal(backdrop.getAttribute("aria-modal"), "true");
+
+    window.openAddSectionModal();
+    assert.equal(backdrop.classList.contains("hidden"), false, "modal opens");
+    await sleep(10);
+    assert.equal(document.activeElement.id, "new-section-name", "focus moves into the dialog");
+
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(backdrop.classList.contains("hidden"), true, "Escape closes the dialog");
+});
+
+test("the mobile menu toggle keeps aria-expanded in sync", async (t) => {
+    const { window, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const trigger = document.querySelector(".hamburger-btn");
+    const menu = document.getElementById("mobileMenu");
+
+    assert.equal(trigger.getAttribute("aria-expanded"), "false");
+    window.toggleMobileMenu();
+    assert.equal(menu.classList.contains("hidden"), false);
+    assert.equal(trigger.getAttribute("aria-expanded"), "true");
+    window.toggleMobileMenu();
+    assert.equal(menu.classList.contains("hidden"), true);
+    assert.equal(trigger.getAttribute("aria-expanded"), "false");
+});

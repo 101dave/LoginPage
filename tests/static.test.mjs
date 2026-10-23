@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v5/);
+    assert.match(sw, /scholog-shell-v6/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -125,4 +125,63 @@ test("attendance writes target the real composite unique key", () => {
     assert.doesNotMatch(source, /onConflict: "user_id,date,student_id"/);
     // Every attendance write carries the subject column used by the unique key.
     assert.match(source, /subject: "General"/);
+});
+
+test("deployment hardening: Vercel headers, robots and sitemap are in place", () => {
+    const vercel = JSON.parse(read("vercel.json"));
+    const globalHeaders = vercel.headers.find((entry) => entry.source === "/(.*)");
+    assert.ok(globalHeaders, "vercel.json defines global headers");
+    const keys = Object.fromEntries(globalHeaders.headers.map((h) => [h.key, h.value]));
+    for (const header of ["Content-Security-Policy", "X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"]) {
+        assert.ok(keys[header], `sends ${header}`);
+    }
+    assert.match(keys["Content-Security-Policy"], /default-src 'self'/);
+    assert.match(keys["Content-Security-Policy"], /object-src 'none'/);
+    // Long-lived caching only for immutable vendored libraries.
+    const vendor = vercel.headers.find((entry) => entry.source === "/vendor/(.*)");
+    assert.match(vendor.headers[0].value, /immutable/);
+
+    assert.match(read("robots.txt"), /Sitemap: https:\/\/scholog\.vercel\.app\/sitemap\.xml/);
+    assert.match(read("robots.txt"), /Disallow: \/main\.html/);
+    const sitemap = read("sitemap.xml");
+    assert.match(sitemap, /<loc>https:\/\/scholog\.vercel\.app\/<\/loc>/);
+});
+
+test("SEO and accessibility basics on every page", () => {
+    for (const page of PAGES) {
+        const html = read(page);
+        assert.match(html, /<meta name="description" content="[^"]{40,}"/, `${page} has a meta description`);
+        assert.match(html, /<html lang="[a-z]{2}"/, `${page} declares a language`);
+        assert.equal((html.match(/<h1[\s>]/g) || []).length >= 1, true, `${page} has an h1`);
+        assert.doesNotMatch(html, /<img(?![^>]*\balt=)[^>]*>/, `${page}: every image has alt text`);
+    }
+    const index = read("index.html");
+    assert.match(index, /<main class="container">/, "login page has a main landmark");
+    assert.match(index, /<meta property="og:title"/, "login page has Open Graph tags");
+    assert.match(index, /<meta name="twitter:card"/, "login page has Twitter card tags");
+
+    const mainHtml = read("main.html");
+    assert.equal((mainHtml.match(/class="modal-backdrop hidden" role="dialog"/g) || []).length, 8,
+        "every modal is a labelled dialog");
+    assert.doesNotMatch(mainHtml, /role="dialog"(?![^>]*aria-label)/, "dialogs are labelled");
+});
+
+test("images are optimised for the web", () => {
+    for (const asset of ["SchologLogo.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
+        const size = fs.statSync(path.join(ROOT, asset)).size;
+        assert.ok(size < 120 * 1024, `${asset} stays under 120 KB (currently ${Math.round(size / 1024)} KB)`);
+    }
+});
+
+test("the heavy PDF libraries load on demand, not on every page view", () => {
+    const mainHtml = read("main.html");
+    assert.doesNotMatch(mainHtml, /<script src="vendor\/jspdf/, "jsPDF is not loaded eagerly");
+    assert.match(read("main.js"), /function loadPdfLibraries/);
+    // Still cached by the service worker so offline exports keep working.
+    assert.match(read("sw.js"), /vendor\/jspdf\.umd\.min\.js/);
+    // Vendor scripts must not sit in <head> and block the first paint.
+    for (const page of ["index.html", "main.html", "scan.html"]) {
+        const head = read(page).split("</head>")[0];
+        assert.doesNotMatch(head, /<script src=/, `${page} has no render-blocking external scripts`);
+    }
 });
