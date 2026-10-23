@@ -3,12 +3,11 @@
 .env.local
 .env.production
 
-# Node / test / helper reference files
+# Node / test / archive artifacts
 node_modules/
 test-results/
 playwright-report/
 *.zip
-VSCODE_COMPLETE_FILES.md
 
 # OS generated files
 .DS_Store
