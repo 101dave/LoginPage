@@ -3,11 +3,10 @@
 .env.local
 .env.production
 
-# Node / test / archive artifacts
+# Node / test artifacts
 node_modules/
 test-results/
 playwright-report/
-*.zip
 
 # OS generated files
 .DS_Store

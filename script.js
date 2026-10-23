@@ -569,3 +569,19 @@ async function handleResetPassword(e) {
         showAlert(friendlyAuthError(err));
     }
 }
+
+
+// Arena Live Preview ZIP Download Button (hidden automatically on localhost / Vercel)
+(function mountPreviewZipButton() {
+    if (!/\.e2b\.app$/i.test(window.location.hostname)) return;
+    window.addEventListener("DOMContentLoaded", () => {
+        if (document.getElementById("arenaZipDownloadBtn")) return;
+        const link = document.createElement("a");
+        link.id = "arenaZipDownloadBtn";
+        link.href = "Scholog-VSCode-Complete.zip";
+        link.download = "Scholog-VSCode-Complete.zip";
+        link.textContent = "⬇ Download Scholog-VSCode-Complete.zip (VS Code Ready)";
+        link.style.cssText = "position:fixed;bottom:16px;left:16px;z-index:9999;display:inline-flex;align-items:center;gap:8px;padding:10px 16px;background:#047857;color:#ffffff;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;box-shadow:0 10px 25px rgba(0,0,0,0.28);border:1px solid #34d399;";
+        document.body.appendChild(link);
+    });
+})();
