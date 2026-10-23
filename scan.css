@@ -942,3 +942,59 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
     padding: 0 5px;
     line-height: 15px;
 }
+
+/* ---- No class today (no QR session) ---- */
+.noclass {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 34px 22px;
+}
+
+.noclass-icon {
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #f1f5f9;
+    border: 1px solid var(--border-light);
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.noclass-icon svg {
+    width: 30px;
+    height: 30px;
+}
+
+.noclass-eyebrow {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.noclass h2 {
+    margin: 2px 0 0;
+    font-size: 22px;
+}
+
+.noclass-note {
+    margin: 10px 0 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px dashed var(--border-color);
+    color: var(--text-muted);
+    font-size: 13px;
+    max-width: 34ch;
+}
+
+.host-scan-note {
+    margin-top: 14px;
+}

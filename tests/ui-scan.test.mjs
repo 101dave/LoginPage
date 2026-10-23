@@ -247,29 +247,45 @@ test("the server block (device already used) is explained clearly", async (t) =>
     assert.equal(document.getElementById("result-retry-id").classList.contains("hidden"), true, "no retry offered");
 });
 
-test("the teacher's own scanner is not device-limited", async (t) => {
-    const { window, dom, fetchCalls } = bootScan({ url: "https://scholog.test/scan.html", session: userSession(), db: defaultDb() });
+test("no QR session for the date means no class: no camera, no ID form", async (t) => {
+    const { window, dom, fetchCalls } = bootScan({
+        handler: (fn) => {
+            if (fn === "checkin_session_info") return { data: { ok: false, error: "invalid_session" } };
+            return { data: {} };
+        }
+    });
     t.after(() => dom.window.close());
     const document = window.document;
 
-    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"));
-    await waitFor(() => document.getElementById("host-section").options.length === 2);
-    document.getElementById("session-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    await waitFor(() => !document.getElementById("host-session").classList.contains("hidden"));
+    await waitFor(() => !document.getElementById("view-noclass").classList.contains("hidden"), { label: "no-class view" });
 
-    document.getElementById("host-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await waitFor(() => camera.callbacks.length > 0);
-    camera.callbacks[0]("2026-0001");
-    await waitFor(() => fetchCalls.filter((call) => call.fn === "checkin_mark").length === 1);
+    // The check-in UI is gone: no scanner, no typed ID, no tabs.
+    assert.equal(document.getElementById("view-student").classList.contains("hidden"), true);
+    assert.equal(camera.started, 0, "camera never starts when there is no class");
+    assert.match(document.getElementById("noclass-text").textContent, /no class|not opened/i);
+    assert.match(document.getElementById("view-noclass").textContent, /Walang pasok/i);
+    assert.match(document.getElementById("view-noclass").textContent, /manually/i);
+    assert.equal(fetchCalls.some((call) => call.fn === "checkin_mark"), false);
+});
 
-    await waitFor(() => camera.stopped >= 1, { label: "first scan stopped" });
-    document.getElementById("host-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await waitFor(() => camera.callbacks.length > 1, { label: "second camera start" });
-    camera.callbacks[1]("2026-0003");
-    await waitFor(() => fetchCalls.filter((call) => call.fn === "checkin_mark").length === 2, { label: "second host scan" });
+test("an expired session still shows the student page but refuses check-in", async (t) => {
+    const { window, dom } = bootScan({
+        handler: (fn) => {
+            if (fn === "checkin_session_info") {
+                return { data: sessionInfo({ expired: true, expires_at: new Date(Date.now() - 60_000).toISOString() }) };
+            }
+            return { data: {} };
+        }
+    });
+    t.after(() => dom.window.close());
+    const document = window.document;
 
-    const marks = fetchCalls.filter((call) => call.fn === "checkin_mark");
-    assert.ok(marks.every((call) => call.body.p_device_id === undefined), "teacher calls carry no device id");
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+
+    document.getElementById("student-id-input").value = "2026-0002";
+    document.getElementById("id-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => document.getElementById("result").classList.contains("result-error"), { label: "expired card" });
+    assert.match(document.getElementById("result-text").textContent, /expired|closed/i);
 });
 
 test("host page opens pre-filled from the dashboard link", async (t) => {
@@ -480,14 +496,14 @@ test("teacher host mode creates a shareable session with QR, link and live roste
     assert.match(document.getElementById("host-roster").textContent, /Present/);
     assert.match(document.getElementById("host-roster").textContent, /Not checked in/);
 
-    // Teacher can also scan a student ID card into the same session.
-    document.getElementById("host-scan-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await waitFor(() => camera.callbacks.length > 0);
-    camera.callbacks[0]("2026-0003");
-    await waitFor(() => fetchCalls.some((call) => call.fn === "checkin_mark"), { label: "host scan" });
-    const mark = fetchCalls.find((call) => call.fn === "checkin_mark");
-    assert.equal(mark.body.p_token, TOKEN);
-    assert.equal(mark.body.p_student_id, "2026-0003");
+    // QR scanning is for students only: the teacher page has no camera scanner.
+    assert.equal(document.getElementById("host-scan-btn"), null);
+    assert.equal(document.getElementById("host-qr-reader"), null);
+    assert.equal(camera.started, 0, "the teacher page never opens a camera");
+    assert.equal(fetchCalls.some((call) => call.fn === "checkin_mark"), false);
+    const manualLink = document.getElementById("host-manual-btn");
+    assert.ok(manualLink, "teacher is pointed at manual recording");
+    assert.match(manualLink.getAttribute("href"), /main\.html/);
 
     document.getElementById("close-session-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     await waitFor(() => db.checkin_sessions[0].closed === true, { label: "session closed" });

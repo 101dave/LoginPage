@@ -43,7 +43,6 @@
         lastCodeAt: 0,
         scanner: null,
         scanning: false,
-        scanTarget: null,
         studentTab: "scan",
         autoScanAttempted: false,
         cameraBlocked: false,
@@ -98,11 +97,28 @@
     }
 
     function setView(name) {
-        ["loading", "student", "host", "problem"].forEach((view) => {
+        ["loading", "student", "host", "problem", "noclass"].forEach((view) => {
             const el = $(`view-${view}`);
             if (el) el.classList.toggle("hidden", view !== name);
         });
         state.mode = name;
+    }
+
+    // No QR session for this date => there is no class to check in for. The
+    // teacher can still record attendance by hand in the dashboard.
+    function showNoClass(detail) {
+        cancelResume();
+        stopScanner();
+        if (state.infoTimer) clearInterval(state.infoTimer);
+        state.infoTimer = null;
+        state.session = null;
+        const text = $("noclass-text");
+        if (text) {
+            text.textContent = detail || "Your teacher has not opened a QR check-in session for this date, so there is no class to check in for.";
+        }
+        $("dashboardLink").classList.add("hidden");
+        $("signOutBtn").classList.add("hidden");
+        setView("noclass");
     }
 
     function showProblem(title, text, options = {}) {
@@ -268,7 +284,7 @@
 
         if (scanActive) {
             if (state.session && !state.session.closed && !state.session.expired) {
-                if (!options.noCamera) startScanner("student");
+                if (!options.noCamera) startScanner();
             }
         } else {
             stopScanner();
@@ -307,6 +323,9 @@
         setStudentTab("scan", { noCamera: true });
         await refreshStudentSession(true);
 
+        // No session = no class: the "walang pasok" screen is final.
+        if (!state.session) return;
+
         // This phone already checked someone in for this session? Show that.
         const lock = readDeviceLock(state.token);
         if (lock && lock.studentId) {
@@ -328,17 +347,23 @@
         if (!cameraSupported() || !state.session) return;
         if (state.session.closed || state.session.expired) return;
         if (state.studentTab !== "scan") return;
-        startScanner("student", { auto: true });
+        startScanner({ auto: true });
     }
 
     async function refreshStudentSession(initial) {
         try {
             const info = await rpc("checkin_session_info", { p_token: state.token });
             if (!info || !info.ok) {
+                const error = info && info.error;
+                if (error === "invalid_session") {
+                    // No session = no class. Nothing to scan, nothing to type.
+                    showNoClass();
+                    return;
+                }
                 if (initial) {
                     showProblem(
                         "Check-in unavailable",
-                        friendlyError(info && info.error),
+                        friendlyError(error),
                         { signIn: false }
                     );
                 }
@@ -650,17 +675,18 @@
         if (note) note.classList.toggle("hidden", !live);
     }
 
-    async function startScanner(target, options = {}) {
-        const isHost = target === "host";
-        const hintEl = $(isHost ? "host-scan-hint" : "camera-hint");
-        const containerId = isHost ? "host-qr-reader" : "qr-reader";
+    // QR scanning belongs to students only; the teacher records attendance in
+    // the dashboard's Attendance sheet.
+    async function startScanner() {
+        const hintEl = $("camera-hint");
+        const containerId = "qr-reader";
+
+        if (state.deviceLocked) return;
 
         if (!cameraSupported()) {
             state.cameraBlocked = true;
-            if (hintEl) hintEl.textContent = isHost
-                ? "Camera scanning isn't available in this browser. Type the Student ID in the roster search instead."
-                : "Camera scanning isn't available in this browser. Tap “Type ID” and enter your Student ID.";
-            if (!isHost) setStudentTab("id");
+            if (hintEl) hintEl.textContent = "Camera scanning isn't available in this browser. Tap “Type ID” and enter your Student ID.";
+            setStudentTab("id");
             return;
         }
         // A camera that is still warming up has no scanner yet; let the tap
@@ -671,7 +697,6 @@
         if (!container) return;
         container.classList.remove("hidden");
 
-        state.scanTarget = target;
         const scanner = new window.Html5Qrcode(containerId, { verbose: false });
         state.scanner = scanner;
         // Mark the scanner busy up front: a QR code can decode before start()
@@ -682,16 +707,14 @@
             await scanner.start(
                 { facingMode: "environment" },
                 { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1.0 },
-                (decoded) => handleDecoded(target, decoded),
+                (decoded) => handleDecoded(decoded),
                 () => { /* per-frame decode misses are normal */ }
             );
             state.cameraBlocked = false;
-            $(isHost ? "host-scan-btn" : "startScanBtn").classList.add("hidden");
-            $(isHost ? "host-stop-scan-btn" : "stopScanBtn").classList.remove("hidden");
-            if (hintEl) hintEl.textContent = isHost
-                ? "Camera on — point it at a student's QR code."
-                : "Camera on — hold your QR code steady inside the frame.";
-            if (!isHost) setScanStageLive(true);
+            $("startScanBtn").classList.add("hidden");
+            $("stopScanBtn").classList.remove("hidden");
+            if (hintEl) hintEl.textContent = "Camera on — hold your QR code steady inside the frame.";
+            setScanStageLive(true);
         } catch (err) {
             console.error("Camera failed to start:", err);
             if (state.scanner === scanner) {
@@ -704,18 +727,17 @@
             if (name === "NotAllowedError") message = "Camera access is blocked. Allow it in your browser settings, or tap “Type ID”.";
             if (name === "NotFoundError") message = "No camera found on this device. Tap “Type ID” to enter your Student ID.";
             if (name === "NotReadableError") message = "The camera is busy in another app. Close it and try again, or tap “Type ID”.";
-            if (hintEl) hintEl.textContent = isHost ? message : `${message} (Camera unavailable — you can still check in.)`;
+            if (hintEl) hintEl.textContent = `${message} (Camera unavailable — you can still check in.)`;
             try { scanner.clear(); } catch (e) { /* ignore */ }
             container.classList.add("hidden");
-            $(isHost ? "host-scan-btn" : "startScanBtn").classList.remove("hidden");
-            $(isHost ? "host-stop-scan-btn" : "stopScanBtn").classList.add("hidden");
-            if (!isHost) setScanStageLive(false);
+            $("startScanBtn").classList.remove("hidden");
+            $("stopScanBtn").classList.add("hidden");
+            setScanStageLive(false);
         }
     }
 
     async function stopScanner() {
-        const target = state.scanTarget;
-        const containerId = target === "host" ? "host-qr-reader" : "qr-reader";
+        const containerId = "qr-reader";
         const scanner = state.scanner;
         state.scanner = null;
         state.scanning = false;
@@ -728,20 +750,16 @@
             container.classList.add("hidden");
             container.innerHTML = "";
         }
-        const startBtn = $(target === "host" ? "host-scan-btn" : "startScanBtn");
-        const stopBtn = $(target === "host" ? "host-stop-scan-btn" : "stopScanBtn");
+        const startBtn = $("startScanBtn");
+        const stopBtn = $("stopScanBtn");
         if (startBtn) startBtn.classList.remove("hidden");
         if (stopBtn) stopBtn.classList.add("hidden");
         setScanStageLive(false);
     }
 
-    async function handleDecoded(target, decoded) {
+    async function handleDecoded(decoded) {
         await stopScanner();
-        if (target === "host") {
-            await hostCheckIn(decoded);
-        } else {
-            await submitStudentId(decoded, { cameFromScan: true });
-        }
+        await submitStudentId(decoded, { cameFromScan: true });
     }
 
     // -------------------------------------------------------------- host mode
@@ -766,7 +784,7 @@
         if (!session || !session.user) {
             showProblem(
                 "Teacher sign-in required",
-                "Open this page from your Scholog dashboard after signing in, or ask your teacher for the class check-in link."
+                "Are you a student? Open the QR code or the link your teacher shared (it looks like scan.html?t=…). Teachers: open this page from your Scholog dashboard after signing in — this page only creates and shares the check-in QR; students do the scanning."
             );
             return;
         }
@@ -931,7 +949,6 @@
         badge.classList.toggle("badge-closed", closed || expired);
 
         $("close-session-btn").disabled = closed;
-        $("host-scan-btn").disabled = closed || expired;
         $("present-btn").disabled = closed || expired;
 
         await loadRoster();
@@ -1024,32 +1041,6 @@
         }
     }
 
-    async function hostCheckIn(rawCode) {
-        if (!state.hostSession) return;
-        const hintEl = $("host-scan-hint");
-        const code = extractStudentId(rawCode);
-        if (!code) {
-            if (hintEl) hintEl.textContent = "That QR code isn't a student ID. Try scanning a student's ID QR code.";
-            return;
-        }
-        try {
-            const data = await rpc("checkin_mark", { p_token: state.hostSession.token, p_student_id: code });
-            if (data && data.ok) {
-                showToast(`${data.student_name} marked Present`);
-                if (hintEl) hintEl.textContent = `${data.student_name} (${data.student_id}) — present.`;
-            } else {
-                const message = friendlyError(data && data.error, state.hostSession.section);
-                showToast(message, "error");
-                if (hintEl) hintEl.textContent = message;
-            }
-        } catch (err) {
-            console.error("Host check-in failed:", err);
-            showToast("Could not save that check-in", "error");
-            if (hintEl) hintEl.textContent = "Could not reach Scholog. Check your connection.";
-        }
-        loadRoster(true);
-    }
-
     async function closeSession() {
         if (!state.hostSession || !sb) return;
         const btn = $("close-session-btn");
@@ -1067,7 +1058,6 @@
             const badge = $("host-session-badge");
             badge.textContent = "Closed";
             badge.classList.add("badge-closed");
-            $("host-scan-btn").disabled = true;
             $("present-btn").disabled = true;
             closePresentation();
             showToast("Check-in closed");
@@ -1090,7 +1080,6 @@
         $("session-qr").innerHTML = "";
         $("presentation-qr").innerHTML = "";
         $("session-link").value = "";
-        $("host-scan-hint").textContent = "";
     }
 
     // Fullscreen QR for the classroom projector.
@@ -1183,7 +1172,7 @@
         $("scan-use-id-btn").addEventListener("click", () => setStudentTab("id"));
         $("id-use-scan-btn").addEventListener("click", () => setStudentTab("scan"));
 
-        $("startScanBtn").addEventListener("click", () => startScanner("student"));
+        $("startScanBtn").addEventListener("click", () => startScanner());
         $("stopScanBtn").addEventListener("click", () => stopScanner());
 
         $("result-retry-id").addEventListener("click", () => setStudentTab("id"));
@@ -1193,8 +1182,6 @@
         });
 
         $("session-form").addEventListener("submit", createSession);
-        $("host-scan-btn").addEventListener("click", () => startScanner("host"));
-        $("host-stop-scan-btn").addEventListener("click", () => stopScanner());
         $("refresh-roster-btn").addEventListener("click", () => {
             loadRoster();
             showToast("Roster refreshed");
@@ -1217,7 +1204,7 @@
             if (state.mode === "student") {
                 refreshStudentSession(false);
                 if (state.studentTab === "scan" && !state.scanning && !state.cameraBlocked && !state.deviceLocked) {
-                    startScanner("student", { auto: true });
+                    startScanner({ auto: true });
                 }
             }
             if (state.mode === "host" && state.hostSession) loadRoster(true);

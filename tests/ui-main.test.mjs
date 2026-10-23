@@ -183,6 +183,37 @@ test("attendance: all-present, save and cloud sync", async (t) => {
     assert.ok(saveCall.payload.every((row) => row.date === date && row.subject === "General"));
 });
 
+test("manual attendance saves even when no QR session was created (no class today)", async (t) => {
+    const { window, client, db, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const date = todayStr();
+
+    // No QR session at all for this date -> "walang pasok" for QR check-in.
+    db.checkin_sessions = [];
+    window.switchTab("attendance");
+    await waitFor(() => document.getElementById("att-table-body").children.length === 3);
+    await sleep(30);
+
+    document.getElementById("att-section").value = "Grade 11 - STEM";
+    document.getElementById("att-date").value = date;
+    window.loadAttendanceSheet();
+    await waitFor(() => document.querySelectorAll("#att-table-body tr").length === 3);
+
+    // The teacher can still record by hand.
+    const row = document.querySelector("#att-table-body tr");
+    const late = [...row.querySelectorAll(".status-btn")].find((b) => b.textContent.trim() === "Late");
+    click(window, late);
+    client.calls.length = 0;
+    await window.saveAttendance();
+    await waitFor(() => document.querySelector(".toast-success"), { label: "save toast" });
+
+    const saveCall = client.calls.find((c) => c.op === "upsert" && Array.isArray(c.payload));
+    assert.ok(saveCall, "manual save still writes attendance");
+    assert.equal(saveCall.payload.length, 3);
+    assert.equal(db.checkin_sessions.length, 0, "saving never creates a QR session");
+});
+
 test("daily PDF export builds the right report", async (t) => {
     const { window, pdf, dom } = await bootMainApp();
     t.after(() => dom.window.close());

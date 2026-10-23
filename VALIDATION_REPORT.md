@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Scope:** `101dave/LoginPage` (the Scholog attendance app), branch `arena/f84174e8-loginpage`
 **Live preview:** `npm run serve` → port 8080
-**Test result:** `npm test` → **49 passing, 0 failing** (1 live-network test skipped; 50 tests total), plus role-based checks run against the production database.
+**Test result:** `npm test` → **52 passing, 0 failing** (1 live-network test skipped; 53 tests total), plus role-based checks run against the production database.
 
 ---
 
@@ -87,7 +87,7 @@ queued.
 ### 3.4 Third-party CDN dependencies (offline/PDF reliability)
 jsPDF, AutoTable, Supabase, Lucide, QR generation and the camera scanner are now
 vendored in `vendor/` (pinned versions, licenses included), so the app and the PDF
-export also work offline. The service worker cache was bumped (`scholog-shell-v4`)
+export also work offline. The service worker cache was bumped (`scholog-shell-v5`)
 so existing installs receive the new code, and the new files were added to the
 offline shell.
 
@@ -256,7 +256,7 @@ navigation (no behaviour change to the underlying RPCs).
 **Tests added** (7): tab switching/one-thing-at-a-time, automatic camera start,
 result + recent list + camera re-arm, dashboard prefill, projection mode
 open/close/Esc, setup-vs-session panel switching, and the launcher passing the
-selected section/date. Suite is now **49 passing, 0 failing**.
+selected section/date. Suite is now **52 passing, 0 failing**.
 
 ## 10. One phone = one check-in
 
@@ -307,3 +307,39 @@ selected section/date. Suite is now **49 passing, 0 failing**.
 **Tests added/updated (`tests/ui-scan.test.mjs`).** Successful check-in locks the
 phone; the device id is sent and the lock survives a reload; the server rejection is
 explained with the other student's name; two teacher scans send no `p_device_id`.
+
+## 11. No QR session = walang pasok · QR scanning is student-only
+
+**Rule (teacher's own words).** If the teacher does not create a QR session for a
+date, there is **no class** for QR check-in that day. Manual recording is always
+available. The QR scanner belongs to **students**, not the teacher.
+
+**Client behaviour**
+
+| Situation | What happens |
+| --- | --- |
+| `checkin_session_info` returns `invalid_session` (session never created / deleted) | Student page switches to `#view-noclass` — "Walang pasok · No class today" + "Your teacher can still record your attendance manually". Camera never starts, ID form is not shown, no tabs. |
+| Session closed | Student page stays, "Check-in closed" result, form disabled. |
+| Session expired | Student page stays, "This check-in link has expired", form disabled. |
+| Teacher page (`scan.html` with no `?t=`) | Create/share/monitor only: QR, link, projection, live roster, refresh, new session, end check-in, plus a **Record manually** shortcut to the dashboard. **No camera buttons.** |
+| Teacher opens the dashboard Attendance sheet | Present / Absent / Late / Excused + Save work with **zero** QR sessions — verified by a test that starts with `checkin_sessions = []`. |
+
+**Code changes**
+- `scan.js`: removed `hostCheckIn()`, `state.scanTarget` and every host branch of
+  `startScanner()` / `stopScanner()`; `handleDecoded()` now only serves students.
+  Added `showNoClass()` and mapped `invalid_session` to it.
+- `scan.html`: removed `#host-scan-btn`, `#host-stop-scan-btn`, `#host-qr-reader`,
+  `#host-scan-hint`; added `#view-noclass` and a **Record manually** link; host copy
+  now says QR check-in is for students only.
+- `main.html` / `main.css`: the QR card and the Attendance sheet both explain
+  "No QR session = walang pasok; you can still record manually".
+
+**Tests**
+- `ui-scan`: "no QR session for the date means no class" (no camera, no form, no
+  `checkin_mark`), "an expired session still shows the student page but refuses
+  check-in", and the host test now asserts there is **no** teacher scanner and the
+  camera never opens.
+- `ui-main`: "manual attendance saves even when no QR session was created".
+- `static`: scanning stays student-only, and the no-class screen/copy exist.
+- Removed the old "teacher's own scanner is not device-limited" test (the teacher
+  scanner no longer exists).
