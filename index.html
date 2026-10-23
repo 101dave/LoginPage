@@ -100,6 +100,24 @@
                 </div>
             </form>
         </div>
+
+        <!-- Download App Suggestion Box sa Ilalim -->
+        <div id="pwaInstallBanner" class="install-suggestion-banner hidden">
+            <div class="install-suggestion-content">
+                <div class="install-suggestion-text">
+                    <strong>Gusto mo ba ng mas mabilis na access?</strong>
+                    <p>I-download ang Scholog app sa iyong device.</p>
+                </div>
+                <button id="pwaInstallBtn" type="button" class="btn-install-suggestion" onclick="triggerPwaInstall()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    <span>Download App</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Custom logic script -->

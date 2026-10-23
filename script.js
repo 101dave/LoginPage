@@ -13,6 +13,54 @@ let authBusy = false;
 let isRecoveryMode = false;
 let resetCooldownTimer = null;
 
+// PWA Install Prompt State
+let deferredPrompt = null;
+
+// Helper para i-check kung Google Chrome ang gamit
+function isGoogleChrome() {
+    const ua = navigator.userAgent;
+    const isChromium = window.chrome;
+    const isOpera = /OPR\//.test(ua);
+    const isEdge = /Edg\//.test(ua);
+    const isSamsungBrowser = /SamsungBrowser/.test(ua);
+    
+    // Siguraduhing Chromium/Chrome ito pero hindi Edge, Opera, o iba pang balat ng Chrome
+    return isChromium && !isOpera && !isEdge && !isSamsungBrowser;
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    
+    // Ipakita lamang ang banner kung Google Chrome ang gamit at hindi pa naka-install
+    const installBanner = document.getElementById("pwaInstallBanner");
+    if (installBanner && isGoogleChrome()) {
+        installBanner.classList.remove("hidden");
+    }
+});
+
+async function triggerPwaInstall() {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") {
+            showAlert("App installed successfully!", "success");
+            const installBanner = document.getElementById("pwaInstallBanner");
+            if (installBanner) installBanner.classList.add("hidden");
+        }
+        deferredPrompt = null;
+    } else {
+        showAlert("To install Scholog: tap your browser's menu button and select 'Install app' or 'Add to Home screen'.", "success");
+    }
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+        const installBanner = document.getElementById("pwaInstallBanner");
+        if (installBanner) installBanner.classList.add("hidden");
+    }
+});
+
 if (window.supabase) {
     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

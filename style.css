@@ -91,6 +91,56 @@ body {
     color: var(--text-muted);
 }
 
+/* Download App Suggestion Banner sa Ilalim */
+.install-suggestion-banner {
+    margin-top: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.875rem 1rem;
+    box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.04);
+}
+
+.install-suggestion-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.install-suggestion-text strong {
+    font-size: 0.8125rem;
+    color: var(--text-main);
+    display: block;
+}
+
+.install-suggestion-text p {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.btn-install-suggestion {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: white;
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.btn-install-suggestion:hover {
+    background-color: var(--primary-hover);
+}
+
 .tabs {
     display: flex;
     background: #f1f5f9;
