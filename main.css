@@ -1477,3 +1477,34 @@ body.auth-pending {
     .history-stats { grid-template-columns: repeat(2, 1fr); }
     .data-table { min-width: 560px; }
 }
+
+/* Score input in the attendance sheet */
+.score-input {
+    width: 60px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    text-align: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text-main);
+}
+
+.score-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* Score percentage badge on the student record page */
+.badge-score {
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    display: inline-block;
+    background: var(--amber-bg);
+    color: var(--amber-text);
+}
