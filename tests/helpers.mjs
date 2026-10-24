@@ -29,6 +29,8 @@ export function defaultDb() {
             { id: 3, user_id: "user-1", date: today, student_id: "2026-0003", status: "Absent", subject: "General" }
         ],
         scores: [],
+        grading_categories: [],
+        section_grading_categories: [],
         checkin_sessions: []
     };
 }
