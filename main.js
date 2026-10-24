@@ -106,13 +106,19 @@ function parseAttKey(key) {
 
 function parseScoreKey(key) {
     // Key format: YYYY-MM-DD_STUDENTID_SUBJECT
-    const firstUnderscore = key.indexOf("_");
-    const secondUnderscore = key.indexOf("_", firstUnderscore + 1);
-    if (secondUnderscore === -1) return { date: "", studentId: "", subject: "" };
+    // Date is always 10 chars (YYYY-MM-DD), then "_", then studentId, then "_", then subject.
+    // Use the LAST underscore to split subject (subjects like "General" never contain "_"),
+    // so student_id values that contain "_" are preserved correctly.
+    if (key.length < 12) return { date: "", studentId: "", subject: "" };
+    const date = key.slice(0, 10);
+    if (key.charAt(10) !== "_") return { date: "", studentId: "", subject: "" };
+    const rest = key.slice(11);
+    const lastUnderscore = rest.lastIndexOf("_");
+    if (lastUnderscore === -1) return { date, studentId: rest, subject: "" };
     return {
-        date: key.slice(0, firstUnderscore),
-        studentId: key.slice(firstUnderscore + 1, secondUnderscore),
-        subject: key.slice(secondUnderscore + 1)
+        date,
+        studentId: rest.slice(0, lastUnderscore),
+        subject: rest.slice(lastUnderscore + 1)
     };
 }
 
@@ -933,8 +939,9 @@ function loadAttendanceSheet() {
             <td class="text-center">
                 <input type="number" class="score-input" min="0" max="100" step="1"
                     value="${currentScore ? esc(currentScore.score) : ""}"
-                    data-student-id="${esc(stud.student_id)}"
-                    data-subject="General"
+                    placeholder="0–100"
+                    title="Type the student's score (0–100)"
+                    data-key="${selectedDate}_${esc(stud.student_id)}_General"
                     onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', 'General', this.value)">
             </td>
         `;
@@ -955,12 +962,21 @@ async function setStudentStatus(date, studentId, status) {
 async function setStudentScore(date, studentId, subject, scoreValue) {
     if (!isValidDateStr(date) || !studentId || !subject) return;
     const score = Number(scoreValue);
-    if (!Number.isFinite(score) || score < 0) return;
+    if (!Number.isFinite(score)) return;
+    if (score < 0 || score > 100) {
+        showToast("Score must be between 0 and 100.", "error");
+        return;
+    }
     const key = `${date}_${studentId}_${subject}`;
     state.scores[key] = { score, max_score: 100, date, subject };
     localMutationSeq++;
     saveLocalStore();
-    await trySync({ t: "scr", date, student_id: studentId, subject, score, max_score: 100 });
+    try {
+        await trySync({ t: "scr", date, student_id: studentId, subject, score, max_score: 100 });
+        showToast(`Score saved: ${score}/100`, "success");
+    } catch (err) {
+        showToast("Score saved locally — will sync when you're back online.", "error");
+    }
 }
 
 async function markAllAttendance(status) {
