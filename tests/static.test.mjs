@@ -211,16 +211,21 @@ test("take attendance: the four status pills stay on one row on phones", () => {
     assert.match(btn, /flex:\s*0 0 auto/);
     assert.match(btn, /white-space:\s*nowrap/);
 
-    // Phones: one card per student (no sideways scrolling) and the picker is a
-    // 4-column grid, so all four choices share a single row.
+    // Phones: the sheet stays a table you scroll sideways (that is fine) — the
+    // picker only gets compact so all four choices share one row.
     const phone = css.match(/@media \(max-width: 640px\)\s*\{[\s\S]*?\n\}/)[0];
-    assert.match(phone, /#view-attendance \.data-table thead \{\s*display: none;/);
-    assert.match(phone, /#view-attendance \.data-table,[\s\S]*?min-width: 0/);
-    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;/);
-    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;[\s\S]*?grid-template-columns: repeat\(4, 1fr\)/);
-    assert.match(phone, /#view-attendance \.status-btn \{[\s\S]*?min-height: 44px/);
+    assert.match(phone, /\.status-pill-group\s*\{[^}]*padding:\s*3px/);
+    assert.match(phone, /\.status-btn\s*\{[^}]*font-size:\s*11px/);
+    assert.match(phone, /\.status-cell\s*\{[^}]*min-width/);
     assert.doesNotMatch(phone, /\.status-pill-group[\s\S]*?flex-wrap:\s*wrap/);
+
+    // ...and it really is still a scrollable table, not a stack of cards.
+    assert.doesNotMatch(css, /#view-attendance \.data-table thead \{\s*display: none/);
+    assert.match(css, /\.data-table \{[^}]*min-width: 620px/);
     assert.match(css, /\.table-responsive\s*\{[^}]*overflow-x:\s*auto/);
+
+    // Touch screens keep the tall tap target without re-widening the pills.
+    assert.match(css, /@media \(hover: none\) and \(max-width: 640px\)\s*\{\s*\.status-btn\s*\{[^}]*padding:\s*8px 8px/);
 
     // The status column is tagged so the phone rules can target it.
     assert.match(read("main.html"), /class="text-center status-col"/);
