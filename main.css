@@ -895,7 +895,7 @@ body.auth-pending {
 .dot-amber { background-color: #f59e0b; }
 .dot-blue { background-color: #3b82f6; }
 
-.status-pill-group { display: inline-flex; flex-wrap: wrap; max-width: 100%; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
+.status-pill-group { display: inline-flex; flex-wrap: nowrap; max-width: 100%; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
 .status-btn {
     padding: 6px 12px;
     font-size: 12px;
@@ -908,6 +908,22 @@ body.auth-pending {
     color: var(--text-muted);
     font-family: inherit;
     transition: var(--transition);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* Phones: the four status choices stay on ONE row — they must never stack.
+   Sizing shrinks so the row still fits the screen; the sheet scrolls sideways
+   instead of wrapping the pills into a second line. */
+@media (max-width: 640px) {
+    .status-pill-group { gap: 2px; padding: 3px; }
+    .status-btn { padding: 6px 8px; font-size: 11px; }
+    #view-attendance .data-table th,
+    #view-attendance .data-table td { padding-left: 12px; padding-right: 12px; }
+    #view-attendance .data-table td.status-cell,
+    #view-attendance .data-table th.status-col { padding-left: 10px; padding-right: 10px; white-space: nowrap; }
+    /* Hold the width the single-line picker needs so auto table layout keeps it. */
+    #view-attendance .data-table td.status-cell { min-width: 236px; }
 }
 .status-btn:hover { color: var(--text-main); }
 .status-btn.active-Present { background-color: var(--status-present-bg); color: #ffffff; }
@@ -1418,7 +1434,8 @@ body.auth-pending {
     .brand span { font-size: 10px; }
     .main-container { padding-left: 0.75rem; padding-right: 0.75rem; }
     .qr-entry-info { min-width: 0; }
-    .status-btn { padding: 6px 8px; font-size: 11px; }
+    .status-btn { padding: 6px 7px; font-size: 11px; }
+    #view-attendance .data-table td.status-cell { min-width: 228px; }
     .modal-backdrop { padding: 10px; }
     .modal-content { padding: 18px; }
 }
@@ -1448,6 +1465,11 @@ body.auth-pending {
 @media (hover: none) {
     .status-btn { min-height: 42px; padding: 8px 12px; }
     .tab-btn { padding: 9px 14px; }
+}
+/* Phones keep the roomy height but the narrow padding, so all four still fit
+   on one line instead of wrapping into a second row. */
+@media (hover: none) and (max-width: 640px) {
+    .status-btn { padding: 8px 8px; }
 }
 
 /* Very narrow phones: the 4-up history stats become 2-up. */

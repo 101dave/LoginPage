@@ -196,3 +196,33 @@ test("the heavy PDF libraries load on demand, not on every page view", () => {
         assert.doesNotMatch(head, /<script src=/, `${page} has no render-blocking external scripts`);
     }
 });
+
+test("take attendance: the four status pills stay on one row on phones", () => {
+    const css = read("main.css");
+
+    // The picker is a single-line segmented control — never a wrapped stack.
+    const group = css.match(/\.status-pill-group\s*\{[^}]*\}/)[0];
+    assert.match(group, /display:\s*inline-flex/);
+    assert.match(group, /flex-wrap:\s*nowrap/, "status pills must not wrap onto a second line");
+    assert.doesNotMatch(css, /\.status-pill-group\s*\{[^}]*flex-wrap:\s*wrap/);
+
+    // Each pill keeps its own width and its label on one line.
+    const btn = css.match(/\.status-btn\s*\{[^}]*\}/)[0];
+    assert.match(btn, /flex:\s*0 0 auto/);
+    assert.match(btn, /white-space:\s*nowrap/);
+
+    // Phones get a compact picker (smaller padding/type) rather than a wrapped one,
+    // and the sheet scrolls sideways so the single row always has room.
+    const phone = css.match(/@media \(max-width: 640px\)\s*\{[\s\S]*?\n\}/)[0];
+    assert.match(phone, /\.status-pill-group\s*\{[^}]*padding:\s*3px/);
+    assert.match(phone, /\.status-btn\s*\{[^}]*font-size:\s*11px/);
+    assert.match(phone, /\.status-cell\s*\{[^}]*min-width/);
+    assert.match(css, /\.table-responsive\s*\{[^}]*overflow-x:\s*auto/);
+
+    // Touch screens keep the tall tap target without re-widening the pills.
+    assert.match(css, /@media \(hover: none\) and \(max-width: 640px\)\s*\{\s*\.status-btn\s*\{[^}]*padding:\s*8px 8px/);
+
+    // The status column is tagged so the phone rules can target it.
+    assert.match(read("main.html"), /class="text-center status-col"/);
+    assert.match(read("main.js"), /class="text-center status-cell"/);
+});
