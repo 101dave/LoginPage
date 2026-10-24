@@ -1139,18 +1139,42 @@ function getSectionGradeCategories(section) {
     return state.gradeCategories.filter(category => selected.has(category.id));
 }
 
-function populateScoreCategoryOptions(section) {
-    const select = document.getElementById("score-category");
-    if (!select) return "";
-    const previous = select.value;
-    const categories = getSectionGradeCategories(section);
-    select.innerHTML = categories.length > 0
-        ? categories.map(category =>
-            `<option value="${esc(category.id)}">${esc(category.name)} (${esc(category.weight)}%)</option>`
-        ).join("")
-        : `<option value="">Set up grading categories first</option>`;
-    if (previous && categories.some(category => category.id === previous)) select.value = previous;
-    return select.value || "";
+function spreadsheetColumnName(index) {
+    let number = index + 1;
+    let name = "";
+    while (number > 0) {
+        number--;
+        name = String.fromCharCode(65 + (number % 26)) + name;
+        number = Math.floor(number / 26);
+    }
+    return name;
+}
+
+function renderScoreSheetHeader(categories, categoryMaximums) {
+    const tableHead = document.getElementById("score-table-head");
+    if (!tableHead) return;
+    tableHead.innerHTML = `<tr>
+        <th class="score-grid-index"><span class="score-column-letter">A</span>#</th>
+        <th class="score-grid-student"><span class="score-column-letter">B</span>Student</th>
+        ${categories.map((category, index) => {
+            const maximum = categoryMaximums.get(category.id) || 100;
+            return `<th class="score-grid-category" data-category-id="${esc(category.id)}">
+                <div class="score-category-heading">
+                    <span class="score-column-letter">${spreadsheetColumnName(index + 2)}</span>
+                    <strong>${esc(category.name)}</strong>
+                    <small>${esc(category.weight)}% weight</small>
+                </div>
+                <label class="score-column-max-label">
+                    <span>Max</span>
+                    <input type="number" class="score-column-max" min="1" step="1" value="${esc(maximum)}"
+                        data-category-id="${esc(category.id)}" data-previous-value="${esc(maximum)}"
+                        aria-label="Maximum score for ${esc(category.name)}"
+                        onchange="updateScoreMaximum('${jsArg(category.id)}', this.value, this)">
+                </label>
+            </th>`;
+        }).join("")}
+        <th class="score-grid-final"><span class="score-column-letter">${spreadsheetColumnName(categories.length + 2)}</span>Final Grade</th>
+    </tr>`;
 }
 
 function renderScoreWeightSummary(section) {
@@ -1282,90 +1306,74 @@ function loadScoreSheet() {
     const selectedDate = document.getElementById("score-date")?.value || "";
     const selectedSec = document.getElementById("score-section")?.value || "";
     const selectedPeriod = document.getElementById("score-period")?.value || "General";
-    const selectedCategoryId = populateScoreCategoryOptions(selectedSec);
-    const selectedCategory = state.gradeCategories.find(category => category.id === selectedCategoryId);
+    const categories = getSectionGradeCategories(selectedSec);
+    const secStudents = selectedSec ? state.students.filter(s => s.section === selectedSec) : [];
     const tableBody = document.getElementById("score-table-body");
-    const maxInput = document.getElementById("score-max");
     if (!tableBody) return;
 
+    const categoryMaximums = new Map(categories.map(category => {
+        const firstSavedScore = secStudents
+            .map(stud => findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category).value)
+            .find(Boolean);
+        const savedMaximum = Number(firstSavedScore?.max_score);
+        return [category.id, Number.isFinite(savedMaximum) && savedMaximum > 0 ? savedMaximum : 100];
+    }));
+    const columnCount = categories.length + 3;
+    renderScoreSheetHeader(categories, categoryMaximums);
     renderScoreWeightSummary(selectedSec);
+
     const periodLabel = selectedPeriod === "General" ? "Unassigned" : selectedPeriod;
-    const categoryLabel = selectedCategory?.name || "No category configured";
     const badge = document.getElementById("score-period-badge");
     const subtitle = document.getElementById("score-sheet-subtitle");
     if (badge) badge.textContent = periodLabel;
     if (subtitle) {
         subtitle.textContent = selectedSec
-            ? `${periodLabel} · ${categoryLabel} · ${selectedSec}`
+            ? `${selectedDate || "No date"} · ${periodLabel} · ${selectedSec} · ${categories.length} assessment column${categories.length === 1 ? "" : "s"}`
             : "Record student scores for the selected date and section";
     }
 
     tableBody.innerHTML = "";
-
     if (!selectedSec) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
         return;
     }
-
     if (!selectedDate) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">Please select a valid date above.</td></tr>`;
         return;
     }
-
-    const secStudents = state.students.filter(s => s.section === selectedSec);
     if (secStudents.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">No students in this section. Add students from Class List view.</td></tr>`;
         return;
     }
-
-    if (!selectedCategory) {
-        if (maxInput) {
-            maxInput.value = "100";
-            maxInput.dataset.previousValue = "100";
-        }
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">Open <strong>Categories &amp; Weights</strong> to add categories and select them for this section.</td></tr>`;
+    if (categories.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">Open <strong>Categories &amp; Weights</strong> to add category columns for this section.</td></tr>`;
         return;
-    }
-
-    const firstSavedScore = secStudents
-        .map(stud => findScoreRecord(selectedDate, stud.student_id, selectedPeriod, selectedCategory).value)
-        .find(Boolean);
-    const savedMaximum = Number(firstSavedScore?.max_score);
-    const sheetMaximum = Number.isFinite(savedMaximum) && savedMaximum > 0 ? savedMaximum : 100;
-
-    if (maxInput) {
-        maxInput.value = String(sheetMaximum);
-        maxInput.dataset.previousValue = String(sheetMaximum);
     }
 
     secStudents.forEach((stud, idx) => {
-        const record = findScoreRecord(selectedDate, stud.student_id, selectedPeriod, selectedCategory);
-        const currentScore = record.value;
-        const currentMaxValue = Number(currentScore?.max_score);
-        const currentMaximum = Number.isFinite(currentMaxValue) && currentMaxValue > 0
-            ? currentMaxValue
-            : sheetMaximum;
-
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td>${idx + 1}</td>
-            <td><strong>${esc(stud.name)}</strong></td>
-            <td class="font-mono">${esc(stud.student_id)}</td>
-            <td>${esc(selectedDate)}</td>
-            <td class="text-center">
-                <div class="score-entry-group">
+            <td class="score-grid-index">${idx + 1}</td>
+            <td class="score-grid-student"><strong>${esc(stud.name)}</strong><small>${esc(stud.student_id)}</small></td>
+            ${categories.map(category => {
+                const record = findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category);
+                const currentScore = record.value;
+                const currentMaxValue = Number(currentScore?.max_score);
+                const currentMaximum = Number.isFinite(currentMaxValue) && currentMaxValue > 0
+                    ? currentMaxValue
+                    : categoryMaximums.get(category.id);
+                return `<td class="score-grid-cell">
                     <input type="number" class="score-input" min="0" max="${esc(currentMaximum)}" step="any"
-                        value="${currentScore ? esc(currentScore.score) : ""}"
-                        placeholder="Score"
-                        title="Type a score from 0 to ${esc(currentMaximum)}"
-                        aria-label="${esc(selectedCategory.name)} score for ${esc(stud.name)}"
-                        data-key="${esc(record.key)}"
+                        value="${currentScore ? esc(currentScore.score) : ""}" placeholder="—"
+                        title="${esc(category.name)}: enter 0 to ${esc(currentMaximum)}"
+                        aria-label="${esc(category.name)} score for ${esc(stud.name)}"
+                        data-key="${esc(record.key)}" data-category-id="${esc(category.id)}"
                         data-max-score="${esc(currentMaximum)}"
-                        onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', '${jsArg(selectedCategory.id)}', this.value, this.dataset.maxScore)">
-                    <span class="score-max-label">/ ${esc(currentMaximum)}</span>
-                </div>
-            </td>
-            <td class="text-center final-grade-cell" data-student-id="${esc(stud.student_id)}">${finalGradeMarkup(stud.student_id, selectedSec, selectedPeriod)}</td>
+                        onkeydown="if (event.key === 'Enter') this.blur();"
+                        onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', '${jsArg(category.id)}', this.value, this.dataset.maxScore)">
+                </td>`;
+            }).join("")}
+            <td class="text-center score-grid-final final-grade-cell" data-student-id="${esc(stud.student_id)}">${finalGradeMarkup(stud.student_id, selectedSec, selectedPeriod)}</td>
         `;
         tableBody.appendChild(tr);
     });
@@ -1381,8 +1389,7 @@ async function setStudentStatus(date, studentId, status) {
     await trySync({ t: "att", date, student_id: studentId, status });
 }
 
-async function updateScoreMaximum(maxScoreValue) {
-    const maxInput = document.getElementById("score-max");
+async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
     if (!maxInput) return false;
 
     const previousMaximum = Number(maxInput.dataset.previousValue) || 100;
@@ -1396,7 +1403,6 @@ async function updateScoreMaximum(maxScoreValue) {
     const date = document.getElementById("score-date")?.value || "";
     const sec = document.getElementById("score-section")?.value || "";
     const gradingPeriod = document.getElementById("score-period")?.value || "General";
-    const categoryId = document.getElementById("score-category")?.value || "";
     const category = state.gradeCategories.find(item => item.id === categoryId);
     if (!isValidDateStr(date) || !sec || !category) {
         maxInput.value = String(previousMaximum);
@@ -1423,12 +1429,10 @@ async function updateScoreMaximum(maxScoreValue) {
     maxInput.value = String(maxScore);
     maxInput.dataset.previousValue = String(maxScore);
     document.querySelectorAll("#score-table-body .score-input").forEach(input => {
+        if (input.dataset.categoryId !== categoryId) return;
         input.max = String(maxScore);
         input.dataset.maxScore = String(maxScore);
-        input.title = `Type a score from 0 to ${maxScore}`;
-    });
-    document.querySelectorAll("#score-table-body .score-max-label").forEach(label => {
-        label.textContent = `/ ${maxScore}`;
+        input.title = `${category.name}: enter 0 to ${maxScore}`;
     });
 
     if (savedRecords.length > 0) {

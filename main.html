@@ -295,14 +295,6 @@
                                 </optgroup>
                             </select>
                         </div>
-                        <div class="input-group">
-                            <label for="score-category"><i data-lucide="layers" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Assessment Category</label>
-                            <select id="score-category" onchange="loadScoreSheet()" class="form-control"></select>
-                        </div>
-                        <div class="input-group">
-                            <label for="score-max"><i data-lucide="list-ordered" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Max Score</label>
-                            <input type="number" id="score-max" class="form-control" min="1" step="1" value="100" onchange="updateScoreMaximum(this.value)">
-                        </div>
                     </div>
                 </div>
                 <div class="score-setup-bar">
@@ -312,32 +304,27 @@
                     </button>
                 </div>
                 <p class="attendance-note">
-                    Category names and weights are shared across your sections; the checkboxes choose which categories this section uses. Both the global weights and this section's selected weights must total 100%. Final grades update automatically as scores are entered.
+                    Excel-style sheet: enter scores directly in each category cell. Every column has its own Max score, and Final Grade recalculates automatically. Categories and weights remain shared across sections.
                 </p>
             </div>
 
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <h2>Student Score Sheet</h2>
+                        <h2>Student Score Spreadsheet</h2>
                         <p id="score-sheet-subtitle" style="margin-top: 4px;">Record student scores for the selected date and section</p>
                     </div>
                     <span id="score-period-badge" class="badge badge-blue">Unassigned</span>
                 </div>
-                <div class="table-responsive">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 50px;">#</th>
-                                <th>Student Name</th>
-                                <th>Student ID</th>
-                                <th>Date</th>
-                                <th class="text-center" style="width: 150px;">Score / Max</th>
-                                <th class="text-center" style="width: 160px;">Final Grade</th>
-                            </tr>
-                        </thead>
+                <div class="table-responsive score-spreadsheet-wrap">
+                    <table class="data-table score-spreadsheet">
+                        <thead id="score-table-head"></thead>
                         <tbody id="score-table-body"></tbody>
                     </table>
+                </div>
+                <div class="score-sheet-legend">
+                    <span><i data-lucide="mouse-pointer-2"></i> Click a cell, type the raw score, then press Enter or leave the cell to save.</span>
+                    <span>Max scores are edited in each category header.</span>
                 </div>
             </div>
         </section>

@@ -185,10 +185,14 @@ test("student scores: custom maximum and grading period save separately from att
     periodSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
     assert.equal(document.getElementById("score-period-badge").textContent, "Quarter 2");
 
-    const maxInput = document.getElementById("score-max");
+    assert.equal(document.getElementById("score-category"), null, "no single-category dropdown remains");
+    assert.equal(document.getElementById("score-max"), null, "no single global maximum remains");
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 1);
+
+    const maxInput = document.querySelector("#score-table-head .score-column-max");
     maxInput.value = "50";
     maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
-    assert.equal(document.querySelector("#score-table-body .score-max-label").textContent, "/ 50");
+    assert.equal(maxInput.value, "50");
 
     const firstScore = document.querySelector("#score-table-body .score-input");
     assert.ok(firstScore, "score input is in the Student Scores sheet");
@@ -212,19 +216,21 @@ test("student scores: custom maximum and grading period save separately from att
     periodSelect.value = "Semester 1";
     window.loadScoreSheet();
     assert.equal(document.querySelector("#score-table-body .score-input").value, "", "another grading period has its own blank sheet");
-    assert.equal(document.getElementById("score-max").value, "100");
+    assert.equal(document.querySelector("#score-table-head .score-column-max").value, "100");
     periodSelect.value = "Quarter 2";
     window.loadScoreSheet();
     assert.equal(document.querySelector("#score-table-body .score-input").value, "40", "the quarter score is restored");
-    assert.equal(document.getElementById("score-max").value, "50", "the custom maximum is restored");
+    assert.equal(document.querySelector("#score-table-head .score-column-max").value, "50", "the custom maximum is restored");
 
-    maxInput.value = "45";
-    maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const updatedMaxInput = document.querySelector("#score-table-head .score-column-max");
+    updatedMaxInput.value = "45";
+    updatedMaxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => client.calls.some((c) => c.table === "scores" && c.op === "upsert" && Array.isArray(c.payload) && c.payload[0].max_score === 45), {
         label: "existing scores receive the new maximum"
     });
     assert.equal(savedScore.max_score, 45);
-    assert.equal(document.querySelector("#score-table-body .score-max-label").textContent, "/ 45");
+    assert.equal(document.querySelector("#score-table-head .score-column-max").value, "45");
+    assert.equal(document.querySelector("#score-table-body .score-input").max, "45");
 
     const secondScore = document.querySelectorAll("#score-table-body .score-input")[1];
     secondScore.value = "60";
@@ -290,19 +296,20 @@ test("student scores: shared categories, section selection and weighted final gr
     otherSetupRow.querySelector(".grading-category-use").checked = false;
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     await waitFor(() => db.section_grading_categories.filter(row => row.section === "Grade 11 - ABM").length === 2);
-    assert.equal(document.getElementById("score-category").options.length, 2, "ABM does not use Other");
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 2, "ABM does not show the Other column");
 
     sectionSelect.value = "Grade 11 - STEM";
     window.loadScoreSheet();
-    const categorySelect = document.getElementById("score-category");
-    assert.equal(categorySelect.options.length, 3, "STEM still uses Other");
-    categorySelect.value = [...categorySelect.options].find(option => option.textContent.startsWith("Written Work")).value;
-    window.loadScoreSheet();
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 3, "STEM still shows the Other column");
+    assert.equal(document.querySelectorAll("#score-table-body tr").length, 3);
+    assert.equal(document.querySelectorAll("#score-table-body tr:first-child .score-input").length, 3, "all category cells are visible together");
 
-    let maxInput = document.getElementById("score-max");
+    const writtenId = db.grading_categories.find(row => row.name === "Written Work").id;
+    const projectId = db.grading_categories.find(row => row.name === "Project").id;
+    let maxInput = document.querySelector(`#score-table-head .score-column-max[data-category-id="${writtenId}"]`);
     maxInput.value = "50";
     maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
-    let firstScore = document.querySelector("#score-table-body .score-input");
+    let firstScore = document.querySelector(`#score-table-body .score-input[data-category-id="${writtenId}"]`);
     firstScore.value = "40";
     firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => db.scores.some(row => row.category_name === "Written Work" && row.score === 40));
@@ -310,15 +317,14 @@ test("student scores: shared categories, section selection and weighted final gr
     assert.match(finalCell.textContent, /80\.00%/);
     assert.match(finalCell.textContent, /Running · 60% weighted/);
 
-    categorySelect.value = [...categorySelect.options].find(option => option.textContent.startsWith("Project")).value;
-    window.loadScoreSheet();
-    maxInput = document.getElementById("score-max");
-    maxInput.value = "50";
+    maxInput = document.querySelector(`#score-table-head .score-column-max[data-category-id="${projectId}"]`);
+    maxInput.value = "100";
     maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
-    firstScore = document.querySelector("#score-table-body .score-input");
-    firstScore.value = "30";
+    firstScore = document.querySelector(`#score-table-body .score-input[data-category-id="${projectId}"]`);
+    firstScore.value = "60";
     firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await waitFor(() => db.scores.some(row => row.category_name === "Project" && row.score === 30));
+    await waitFor(() => db.scores.some(row => row.category_name === "Project" && row.score === 60));
+    assert.equal(document.querySelector(`#score-table-head .score-column-max[data-category-id="${writtenId}"]`).value, "50", "one column's Max does not change another column");
     finalCell = document.querySelector("#score-table-body .final-grade-cell");
     assert.match(finalCell.textContent, /72\.00%/);
     assert.match(finalCell.textContent, /Final/);
