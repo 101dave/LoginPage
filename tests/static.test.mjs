@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v8/);
+    assert.match(sw, /scholog-shell-v9/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -139,6 +139,20 @@ test("attendance writes target the real composite unique key", () => {
     assert.match(source, /subject: "General"/);
 });
 
+test("grading migration preserves scores and matches category-id writes", () => {
+    const sql = read("supabase/migrations/20261025_grading_categories.sql");
+    const main = read("main.js");
+    assert.match(sql, /create table if not exists public\.grading_categories/);
+    assert.match(sql, /create table if not exists public\.section_grading_categories/);
+    for (const column of ["category_id", "category_name", "category_weight", "grading_period"]) {
+        assert.match(sql, new RegExp(`add column if not exists ${column}`));
+    }
+    assert.match(sql, /update public\.scores s[\s\S]*category_id = coalesce/);
+    assert.match(sql, /on public\.scores \(user_id, date, student_id, grading_period, category_id\)/);
+    assert.match(sql, /drop function if exists public\.upsert_score/);
+    assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id"/);
+});
+
 test("deployment hardening: Vercel headers, robots and sitemap are in place", () => {
     const vercel = JSON.parse(read("vercel.json"));
     const globalHeaders = vercel.headers.find((entry) => entry.source === "/(.*)");
@@ -173,7 +187,7 @@ test("SEO and accessibility basics on every page", () => {
     assert.match(index, /<meta name="twitter:card"/, "login page has Twitter card tags");
 
     const mainHtml = read("main.html");
-    assert.equal((mainHtml.match(/class="modal-backdrop hidden" role="dialog"/g) || []).length, 8,
+    assert.equal((mainHtml.match(/class="modal-backdrop hidden" role="dialog"/g) || []).length, 9,
         "every modal is a labelled dialog");
     assert.doesNotMatch(mainHtml, /role="dialog"(?![^>]*aria-label)/, "dialogs are labelled");
 });

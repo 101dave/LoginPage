@@ -296,13 +296,23 @@
                             </select>
                         </div>
                         <div class="input-group">
+                            <label for="score-category"><i data-lucide="layers" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Assessment Category</label>
+                            <select id="score-category" onchange="loadScoreSheet()" class="form-control"></select>
+                        </div>
+                        <div class="input-group">
                             <label for="score-max"><i data-lucide="list-ordered" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Max Score</label>
                             <input type="number" id="score-max" class="form-control" min="1" step="1" value="100" onchange="updateScoreMaximum(this.value)">
                         </div>
                     </div>
                 </div>
+                <div class="score-setup-bar">
+                    <p id="score-weight-summary">Set up this section's grading categories and weights.</p>
+                    <button type="button" onclick="openGradingSetup()" class="btn btn-secondary">
+                        <i data-lucide="settings-2"></i> Categories &amp; Weights
+                    </button>
+                </div>
                 <p class="attendance-note">
-                    Choose a grading period and set the maximum score first. Enter each student's raw score below; it saves automatically with the selected maximum.
+                    Category names and weights are shared across your sections; the checkboxes choose which categories this section uses. Both the global weights and this section's selected weights must total 100%. Final grades update automatically as scores are entered.
                 </p>
             </div>
 
@@ -323,6 +333,7 @@
                                 <th>Student ID</th>
                                 <th>Date</th>
                                 <th class="text-center" style="width: 150px;">Score / Max</th>
+                                <th class="text-center" style="width: 160px;">Final Grade</th>
                             </tr>
                         </thead>
                         <tbody id="score-table-body"></tbody>
@@ -331,6 +342,36 @@
             </div>
         </section>
     </main>
+
+    <!-- Modal: Shared Categories & Section Grading Weights -->
+    <div id="modal-grading-setup" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Grading categories and section weights">
+        <div class="modal-content grading-setup-modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Categories &amp; Weights</h3>
+                    <p id="grading-setup-section" class="modal-subtext"></p>
+                </div>
+                <button type="button" onclick="closeModal('modal-grading-setup')" class="close-btn" aria-label="Close modal"><i data-lucide="x"></i></button>
+            </div>
+            <form id="form-grading-setup" onsubmit="saveGradingSetup(event)" class="modal-form">
+                <p class="modal-body-copy">Add categories such as Written Work, Performance Task, Quiz, Midterm, Final Exam, or your own. Weights are shared across sections; “Use” selects the categories for this section.</p>
+                <div class="grading-weight-head" aria-hidden="true"><span>Use</span><span>Category</span><span>Global weight</span></div>
+                <div id="grading-weight-rows" class="grading-weight-rows"></div>
+                <button type="button" id="add-grade-category-btn" onclick="addGradingCategoryRow()" class="btn btn-secondary grading-add-category">
+                    <i data-lucide="plus"></i> Add Category
+                </button>
+                <div class="grading-totals">
+                    <div id="grading-global-total" class="grading-weight-total" aria-live="polite">All categories: 0%</div>
+                    <div id="grading-section-total" class="grading-weight-total" aria-live="polite">This section: 0%</div>
+                </div>
+                <p id="grading-setup-error" class="grading-setup-error hidden" role="alert"></p>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-grading-setup')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Grading Setup</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- Modal: Profile Settings & Data Management (Redesigned UI) -->
     <div id="modal-profile" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Profile settings">
@@ -393,7 +434,7 @@
                         </div>
                         <div>
                             <h4>Data Management</h4>
-                            <p>Export a backup file of your students and attendance logs, or restore from a previously saved JSON backup file.</p>
+                            <p>Export a backup of your students, attendance, scores and grading setup, or restore a previously saved JSON backup file.</p>
                         </div>
                     </div>
 

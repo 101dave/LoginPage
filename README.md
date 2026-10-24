@@ -56,20 +56,32 @@ links and JSON payloads.
 | Student | Class + date + progress, a **"One phone = one check-in"** rule chip, then a **Scan QR / Type ID** switch, auto-starting camera, a big green confirmation that ends the flow, a "Checked in here" chip and a collapsible 3-step help panel |
 | Teacher | A **1-2-3** flow: choose class → share the QR/link → watch the live roster; projection mode, copy/share, refresh, new session, end check-in and a **Record manually** shortcut are always one tap away (no teacher-side camera scanning) |
 
-## Recording scores
+## Recording scores and final grades
 
-Open **Student Scores**, choose a date, section and grading period (Quarter 1–4,
-Semester 1–2, or Unassigned for older records), then set any whole-number maximum
-such as 50 or 100. Raw scores save automatically and cannot exceed the selected
-maximum. Changing the maximum also updates scores already entered on that sheet,
-provided none of them is higher than the new maximum.
+Open **Student Scores → Categories & Weights** to create categories such as Written
+Work, Performance Task, Quiz, Midterm, Final Exam, Project, or Recitation. Category
+names and weights are shared across sections, while each section chooses its own
+categories. Both the global category weights and each saved section selection must
+total 100%.
+
+Choose a date, grading period (Quarter 1–4, Semester 1–2, or Unassigned), category,
+and maximum score, then enter raw scores. Different dates and categories can hold
+different assessments. Each category's percentage is its total raw points divided
+by its total maximum points; the final grade combines those percentages using the
+section's weights. Until every selected weighted category has a score, the table
+shows a **running grade** rather than a complete final grade.
+
+Apply `supabase/migrations/20261025_grading_categories.sql` before using the new
+setup. It preserves and backfills existing scores with grading-period and category
+metadata, and creates the shared category and section-selection tables.
 
 ## Backend
 
 - Supabase project settings live in `.env` and are mirrored in `script.js`, `main.js`
   and `scan.js` (the app is static, so the publishable anon key is embedded — RLS
   protects the data).
-- Tables: `sections`, `students`, `attendance`, `scores`, `checkin_sessions`.
+- Tables: `sections`, `students`, `attendance`, `scores`, `grading_categories`,
+  `section_grading_categories`, `checkin_sessions`.
 - Attendance is unique per `(user_id, date, student_id, subject)`; the app writes
   `subject = 'General'` and upserts on that exact conflict target.
 - Public check-in RPCs: `checkin_session_info(token)` and

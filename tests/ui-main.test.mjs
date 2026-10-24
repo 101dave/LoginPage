@@ -29,6 +29,12 @@ function click(window, element) {
     element.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 }
 
+function setGradingRow(row, name, weight, used = true) {
+    row.querySelector(".grading-category-name").value = name;
+    row.querySelector(".grading-category-weight").value = String(weight);
+    row.querySelector(".grading-category-use").checked = used;
+}
+
 test("dashboard renders totals, present/absent counts and section breakdown", async (t) => {
     const { window, dom } = await bootMainApp();
     t.after(() => dom.window.close());
@@ -158,8 +164,14 @@ test("student scores: custom maximum and grading period save separately from att
     assert.ok(document.getElementById("mob-nav-scores"), "mobile Student Scores navigation exists");
 
     window.switchTab("scores");
-    await waitFor(() => document.querySelectorAll("#score-table-body tr").length === 3, { label: "score rows" });
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false, { label: "score view" });
     await sleep(30);
+
+    window.openGradingSetup();
+    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Written Work", 100, true);
+    document.getElementById("form-grading-setup").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => document.querySelectorAll("#score-table-body .score-input").length === 3, { label: "score rows" });
+    await waitFor(() => db.grading_categories.length === 1, { label: "category cloud sync" });
 
     assert.equal(document.getElementById("view-scores").classList.contains("hidden"), false);
     assert.equal(document.getElementById("view-attendance").classList.contains("hidden"), true);
@@ -190,6 +202,12 @@ test("student scores: custom maximum and grading period save separately from att
     const savedScore = db.scores.find((row) => row.student_id === "2026-0001" && row.date === date && row.subject === "Quarter 2");
     assert.equal(savedScore.score, 40);
     assert.equal(savedScore.max_score, 50);
+    assert.equal(savedScore.grading_period, "Quarter 2");
+    assert.equal(savedScore.category_name, "Written Work");
+    assert.equal(savedScore.category_weight, 100);
+    assert.equal(savedScore.category_id, db.grading_categories[0].id);
+    const scoreCall = client.calls.find((c) => c.table === "scores" && c.op === "upsert" && c.payload.score === 40);
+    assert.equal(scoreCall.options.onConflict, "user_id,date,student_id,grading_period,category_id");
 
     periodSelect.value = "Semester 1";
     window.loadScoreSheet();
@@ -224,6 +242,119 @@ test("student scores: custom maximum and grading period save separately from att
     await window.saveAttendance();
     assert.ok(client.calls.some((c) => c.table === "attendance" && c.op === "upsert"), "attendance still saves");
     assert.equal(client.calls.some((c) => c.table === "scores" && c.op !== "select"), false, "saving attendance never writes scores");
+});
+
+test("student scores: shared categories, section selection and weighted final grade", async (t) => {
+    const { window, db, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const date = todayStr();
+
+    window.switchTab("scores");
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false);
+    await sleep(30);
+    document.getElementById("score-period").value = "Quarter 1";
+
+    window.openGradingSetup();
+    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Written Work", 60, true);
+    click(window, document.getElementById("add-grade-category-btn"));
+    let rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[1], "Project", 40, true);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[2], "Other", 1, true);
+
+    const form = document.getElementById("form-grading-setup");
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => !document.getElementById("grading-setup-error").classList.contains("hidden"));
+    assert.match(document.getElementById("grading-setup-error").textContent, /All category weights must total 100%/);
+
+    setGradingRow(rows[2], "Other", 0, true);
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.length === 3, { label: "three shared categories" });
+    await waitFor(() => db.section_grading_categories.filter(row => row.section === "Grade 11 - STEM").length === 3);
+
+    const sectionSelect = document.getElementById("score-section");
+    sectionSelect.value = "Grade 11 - ABM";
+    window.loadScoreSheet();
+    window.openGradingSetup();
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    const projectSetupRow = rows.find(row => row.querySelector(".grading-category-name").value === "Project");
+    const otherSetupRow = rows.find(row => row.querySelector(".grading-category-name").value === "Other");
+    projectSetupRow.querySelector(".grading-category-use").checked = false;
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => /must total 100%/.test(document.getElementById("grading-setup-error").textContent));
+    assert.match(document.getElementById("grading-setup-error").textContent, /Current total: 60%/);
+
+    projectSetupRow.querySelector(".grading-category-use").checked = true;
+    otherSetupRow.querySelector(".grading-category-use").checked = false;
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.section_grading_categories.filter(row => row.section === "Grade 11 - ABM").length === 2);
+    assert.equal(document.getElementById("score-category").options.length, 2, "ABM does not use Other");
+
+    sectionSelect.value = "Grade 11 - STEM";
+    window.loadScoreSheet();
+    const categorySelect = document.getElementById("score-category");
+    assert.equal(categorySelect.options.length, 3, "STEM still uses Other");
+    categorySelect.value = [...categorySelect.options].find(option => option.textContent.startsWith("Written Work")).value;
+    window.loadScoreSheet();
+
+    let maxInput = document.getElementById("score-max");
+    maxInput.value = "50";
+    maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    let firstScore = document.querySelector("#score-table-body .score-input");
+    firstScore.value = "40";
+    firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.some(row => row.category_name === "Written Work" && row.score === 40));
+    let finalCell = document.querySelector("#score-table-body .final-grade-cell");
+    assert.match(finalCell.textContent, /80\.00%/);
+    assert.match(finalCell.textContent, /Running · 60% weighted/);
+
+    categorySelect.value = [...categorySelect.options].find(option => option.textContent.startsWith("Project")).value;
+    window.loadScoreSheet();
+    maxInput = document.getElementById("score-max");
+    maxInput.value = "50";
+    maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    firstScore = document.querySelector("#score-table-body .score-input");
+    firstScore.value = "30";
+    firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.some(row => row.category_name === "Project" && row.score === 30));
+    finalCell = document.querySelector("#score-table-body .final-grade-cell");
+    assert.match(finalCell.textContent, /72\.00%/);
+    assert.match(finalCell.textContent, /Final/);
+
+    window.openGradingSetup();
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    rows.forEach(row => {
+        const name = row.querySelector(".grading-category-name").value;
+        if (name === "Written Work" || name === "Project") row.querySelector(".grading-category-weight").value = "50";
+    });
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.scores.filter(row => row.student_id === "2026-0001" && row.date === date)
+        .every(row => row.category_weight === 50), { label: "existing score weights updated" });
+
+    finalCell = document.querySelector("#score-table-body .final-grade-cell");
+    assert.match(finalCell.textContent, /70\.00%/, "final grade recalculates after global weights change");
+    assert.match(finalCell.textContent, /Final/);
+    assert.ok(db.scores.every(row => row.category_id && row.category_name && row.grading_period), "every score keeps its category metadata");
+
+    const renamedCategoryId = db.grading_categories.find(row => row.name === "Project").id;
+    window.openGradingSetup();
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    rows.find(row => row.querySelector(".grading-category-name").value === "Project")
+        .querySelector(".grading-category-name").value = "Performance Task";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.scores.some(row => row.category_name === "Performance Task"), { label: "category rename updates scores" });
+    assert.equal(db.scores.length, 2, "renaming a category does not duplicate scores");
+    assert.equal(db.scores.find(row => row.category_name === "Performance Task").category_id, renamedCategoryId);
+    assert.equal(db.scores.some(row => row.category_name === "Project"), false);
+    assert.match(document.querySelector("#score-table-body .final-grade-cell").textContent, /70\.00%/);
+
+    await window.pushFullStateToCloud();
+    assert.equal(db.grading_categories.length, 3, "full restore retains shared categories");
+    assert.equal(db.section_grading_categories.length, 5, "full restore retains both sections' selections");
+    assert.equal(db.scores.length, 2, "full restore retains scores");
+    assert.ok(db.scores.every(row => row.category_id && ["Written Work", "Performance Task"].includes(row.category_name)));
 });
 
 test("attendance: all-present, save and cloud sync", async (t) => {

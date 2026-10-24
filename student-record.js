@@ -223,6 +223,7 @@
                     <tr>
                         <td>${escapeHtml(formatDate(row.date))}</td>
                         <td>${escapeHtml(row.grading_period || row.subject || "General")}</td>
+                        <td>${escapeHtml(row.category_name || "General")}${row.category_weight != null ? ` (${escapeHtml(String(row.category_weight))}%)` : ""}</td>
                         <td class="text-right font-mono">${escapeHtml(String(row.score))} / ${escapeHtml(String(row.max_score))}</td>
                         <td class="text-center"><span class="badge badge-score">${escapeHtml(pct)}</span></td>
                     </tr>

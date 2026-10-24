@@ -1478,9 +1478,33 @@ body.auth-pending {
     .data-table { min-width: 560px; }
 }
 
-/* Student Scores: grading-period filters and flexible raw-score maximums */
-@media (min-width: 1000px) {
-    #view-scores .filter-inputs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* Student Scores: category setup, weighted grades and flexible maximums */
+@media (min-width: 1100px) {
+    #view-scores .filter-inputs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+#view-scores .data-table { min-width: 800px; }
+
+.score-setup-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+}
+
+.score-setup-bar p {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+@media (min-width: 700px) {
+    .score-setup-bar { flex-direction: row; align-items: center; justify-content: space-between; }
+    .score-setup-bar .btn { flex-shrink: 0; }
 }
 
 .score-entry-group {
@@ -1498,6 +1522,97 @@ body.auth-pending {
     font-size: 13px;
     font-weight: 700;
     text-align: left;
+}
+
+.final-grade-cell {
+    min-width: 140px;
+    white-space: normal !important;
+}
+
+.final-grade-cell strong,
+.final-grade-cell small {
+    display: block;
+}
+
+.final-grade-value {
+    color: var(--text-main);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 16px;
+    line-height: 1.3;
+}
+
+.final-grade-cell small {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.final-grade-cell .final-grade-complete { color: var(--emerald-text); font-weight: 700; }
+.final-grade-cell .final-grade-running { color: var(--amber-text); }
+.final-grade-empty { color: var(--text-muted); font-size: 18px; }
+
+.grading-setup-modal { max-width: 650px; }
+.grading-weight-rows { display: flex; flex-direction: column; gap: 10px; }
+.grading-weight-head,
+.grading-weight-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 118px;
+    align-items: center;
+    gap: 10px;
+}
+
+.grading-weight-head {
+    margin-bottom: -8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.grading-weight-head span:last-child { text-align: center; }
+.grading-category-use { width: 20px; height: 20px; margin: 0 auto; accent-color: var(--primary); }
+.grading-category-name { min-width: 0; }
+.grading-weight-input { position: relative; }
+.grading-weight-input input { padding-right: 28px; text-align: right; }
+.grading-weight-input span {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.grading-add-category { align-self: flex-start; }
+.grading-totals { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 480px) { .grading-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.grading-weight-total {
+    padding: 10px 12px;
+    border: 1px solid var(--emerald-border);
+    border-radius: var(--radius-sm);
+    background: var(--emerald-bg);
+    color: var(--emerald-text);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.grading-weight-total.invalid {
+    border-color: var(--rose-border);
+    background: var(--rose-bg);
+    color: var(--rose-text);
+}
+
+.grading-setup-error {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--rose-bg);
+    color: var(--rose-text);
+    font-size: 12px;
+    line-height: 1.5;
 }
 
 /* Score input in the dedicated Student Scores sheet */
