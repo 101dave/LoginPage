@@ -45,6 +45,7 @@ begin
 
     return jsonb_build_object(
         'ok', true,
+        'user_id', s.user_id,
         'section', s.section,
         'date', s.attendance_date,
         'closed', s.closed,

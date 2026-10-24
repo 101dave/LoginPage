@@ -496,6 +496,18 @@
                     { locked: true });
 
                 $("student-id-input").value = "";
+
+                // Open the student's attendance + score record on a separate page.
+                const userId = state.session && state.session.user_id ? state.session.user_id : "";
+                const recordUrl = new URL("student-record.html", window.location.href);
+                recordUrl.searchParams.set("t", state.token);
+                recordUrl.searchParams.set("sid", data.student_id);
+                if (userId) recordUrl.searchParams.set("uid", userId);
+                const doneBtn = $("result-done");
+                if (doneBtn) {
+                    doneBtn.textContent = "View my record";
+                    doneBtn.onclick = () => { window.location.href = recordUrl.href; };
+                }
             } else if (data && data.error === "device_already_used") {
                 const owner = data.device_student_name ? `${data.device_student_name} (${data.device_student_id})` : "another student";
                 state.deviceLocked = true;

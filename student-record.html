@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scholog — My Attendance Record</title>
+    <meta name="description" content="View your attendance history and scores.">
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Scholog">
+    <meta property="og:title" content="Scholog — My Attendance Record">
+    <meta property="og:description" content="View your attendance history and scores.">
+    <meta name="theme-color" content="#f8fafc">
+    <link rel="icon" type="image/png" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="scan.css">
+</head>
+<body>
+
+    <header class="scan-header">
+        <div class="scan-header-inner">
+            <a href="index.html" class="scan-brand" title="Scholog">
+                <img src="SchologLogo.png" alt="Scholog Logo" class="scan-logo" width="256" height="256" decoding="async">
+                <div>
+                    <h1>Scholog</h1>
+                    <span>My Record</span>
+                </div>
+            </a>
+            <div class="scan-header-actions">
+                <a href="scan.html" class="btn btn-ghost btn-sm" id="backToScanBtn">Check in again</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="scan-main">
+
+        <!-- Loading -->
+        <section id="view-loading" class="panel panel-center" aria-live="polite">
+            <div class="spinner" aria-hidden="true"></div>
+            <p class="muted">Loading your record…</p>
+        </section>
+
+        <!-- Not found / error -->
+        <section id="view-notfound" class="hidden panel panel-center">
+            <div class="result-icon result-icon-error" aria-hidden="true">!</div>
+            <h2 id="notfound-title">Record not found</h2>
+            <p class="muted" id="notfound-text"></p>
+            <div class="btn-row">
+                <a class="btn btn-secondary" href="index.html">Back to Scholog</a>
+            </div>
+        </section>
+
+        <!-- Student record -->
+        <section id="view-record" class="hidden">
+
+            <div class="class-strip">
+                <div class="class-strip-text">
+                    <div class="class-strip-top">
+                        <span class="badge" id="record-section-badge">—</span>
+                        <span class="class-strip-label">Your attendance record</span>
+                    </div>
+                    <h2 id="record-student-name">Student</h2>
+                    <p class="muted" id="record-student-id">Student ID: —</p>
+                </div>
+            </div>
+
+            <!-- Attendance history -->
+            <div class="card">
+                <div class="card-head">
+                    <h3>Attendance History</h3>
+                    <span class="badge" id="record-total-days">0 days</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th class="text-center">Status</th>
+                                <th>Subject</th>
+                            </tr>
+                        </thead>
+                        <tbody id="record-attendance-body"></tbody>
+                    </table>
+                </div>
+                <p id="record-attendance-empty" class="muted hint-center hidden">No attendance records yet.</p>
+            </div>
+
+            <!-- Scores -->
+            <div class="card">
+                <div class="card-head">
+                    <h3>Scores</h3>
+                    <span class="badge" id="record-score-count">0 scores</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Subject</th>
+                                <th class="text-right">Score</th>
+                                <th class="text-center">Result</th>
+                            </tr>
+                        </thead>
+                        <tbody id="record-scores-body"></tbody>
+                    </table>
+                </div>
+                <p id="record-scores-empty" class="muted hint-center hidden">No scores recorded yet.</p>
+            </div>
+
+            <p class="hint-center">
+                Questions about your record? Please ask your teacher.
+            </p>
+
+        </section>
+
+        <div id="toast-container" class="toast-container" aria-live="polite"></div>
+    </main>
+
+    <footer class="scan-footer">
+        <p>Scholog — Student &amp; Attendance Tracker · <a href="privacy.html">Privacy</a></p>
+    </footer>
+
+    <script src="vendor/supabase.js"></script>
+    <script src="student-record.js"></script>
+</body>
+</html>

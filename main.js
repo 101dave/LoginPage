@@ -24,7 +24,8 @@ let localMutationSeq = 0;
 let state = {
     sections: [],
     students: [],
-    attendance: {}
+    attendance: {},
+    scores: {}
 };
 
 // Keep session user fresh on automatic background token refresh
@@ -103,6 +104,18 @@ function parseAttKey(key) {
     return { date: key.slice(0, 10), studentId: key.slice(11) };
 }
 
+function parseScoreKey(key) {
+    // Key format: YYYY-MM-DD_STUDENTID_SUBJECT
+    const firstUnderscore = key.indexOf("_");
+    const secondUnderscore = key.indexOf("_", firstUnderscore + 1);
+    if (secondUnderscore === -1) return { date: "", studentId: "", subject: "" };
+    return {
+        date: key.slice(0, firstUnderscore),
+        studentId: key.slice(firstUnderscore + 1, secondUnderscore),
+        subject: key.slice(secondUnderscore + 1)
+    };
+}
+
 function reportDbError(action, error) {
     console.error(`Scholog sync error (${action}):`, error);
     showToast(`Sync failed while ${action}. ${error && error.message ? error.message : "Check your connection."}`, "error");
@@ -157,7 +170,18 @@ function normalizeState(raw) {
         }
     });
 
-    return { sections, students, attendance };
+    const scores = {};
+    const rawSc = (raw.scores && typeof raw.scores === "object" && !Array.isArray(raw.scores))
+        ? raw.scores
+        : {};
+    Object.keys(rawSc).forEach(k => {
+        const { date, studentId, subject } = parseScoreKey(k);
+        if (isValidDateStr(date) && studentId && subject) {
+            scores[k] = rawSc[k];
+        }
+    });
+
+    return { sections, students, attendance, scores };
 }
 
 // --- Initialization ---
@@ -292,6 +316,11 @@ async function fetchCloudState() {
         fetchAll("attendance", currentUser.id)
     ]);
 
+    // Scores table may not exist yet on older deployments — don't let that
+    // block loading the rest of the dashboard.
+    let scData = [];
+    try { scData = await fetchAll("scores", currentUser.id); } catch (err) { /* ignore */ }
+
     const sections = secData.map(s => s.name);
     const students = studData.map(s => ({
         id: s.id.toString(),
@@ -306,6 +335,16 @@ async function fetchCloudState() {
         attendance[`${row.date}_${row.student_id}`] = row.status;
     });
 
+    const scores = {};
+    scData.forEach(row => {
+        scores[`${row.date}_${row.student_id}_${row.subject}`] = {
+            score: row.score,
+            max_score: row.max_score,
+            date: row.date,
+            subject: row.subject
+        };
+    });
+
     // Ensure every student's section appears in state.sections
     students.forEach(s => {
         if (s.section && !sections.includes(s.section)) {
@@ -313,7 +352,7 @@ async function fetchCloudState() {
         }
     });
 
-    return { sections, students, attendance };
+    return { sections, students, attendance, scores };
 }
 
 function applyCloudState(snapshot) {
@@ -407,6 +446,21 @@ async function applyCloudOp(op) {
                 must(await supabaseClient.from("attendance")
                     .upsert(op.rows.slice(i, i + 500).map(r => ({
                         user_id: uid, subject: "General", ...r
+                    })), { onConflict: "user_id,date,student_id,subject" }));
+            }
+            break;
+        }
+        case "scr": // one score
+            must(await supabaseClient.from("scores").upsert({
+                user_id: uid, date: op.date, student_id: op.student_id,
+                subject: op.subject || "General", score: op.score, max_score: op.max_score ?? 100
+            }, { onConflict: "user_id,date,student_id,subject" }));
+            break;
+        case "scrB": { // batch scores
+            for (let i = 0; i < op.rows.length; i += 500) {
+                must(await supabaseClient.from("scores")
+                    .upsert(op.rows.slice(i, i + 500).map(r => ({
+                        user_id: uid, ...r
                     })), { onConflict: "user_id,date,student_id,subject" }));
             }
             break;
@@ -839,24 +893,26 @@ function loadAttendanceSheet() {
     tableBody.innerHTML = "";
 
     if (!selectedSec) {
-        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
         return;
     }
 
     if (!selectedDate) {
-        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
         return;
     }
 
     const secStudents = state.students.filter(s => s.section === selectedSec);
 
     if (secStudents.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
         return;
     }
 
     secStudents.forEach((stud, idx) => {
         const key = `${selectedDate}_${stud.student_id}`;
+        const scoreKey = `${selectedDate}_${stud.student_id}_General`;
+        const currentScore = state.scores[scoreKey];
         const currentStatus = state.attendance[key] || "Present";
 
         const tr = document.createElement("tr");
@@ -874,6 +930,13 @@ function loadAttendanceSheet() {
                     `).join("")}
                 </div>
             </td>
+            <td class="text-center">
+                <input type="number" class="score-input" min="0" max="100" step="1"
+                    value="${currentScore ? esc(currentScore.score) : ""}"
+                    data-student-id="${esc(stud.student_id)}"
+                    data-subject="General"
+                    onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', 'General', this.value)">
+            </td>
         `;
         tableBody.appendChild(tr);
     });
@@ -887,6 +950,17 @@ async function setStudentStatus(date, studentId, status) {
     loadAttendanceSheet();
     saveLocalStore();
     await trySync({ t: "att", date, student_id: studentId, status });
+}
+
+async function setStudentScore(date, studentId, subject, scoreValue) {
+    if (!isValidDateStr(date) || !studentId || !subject) return;
+    const score = Number(scoreValue);
+    if (!Number.isFinite(score) || score < 0) return;
+    const key = `${date}_${studentId}_${subject}`;
+    state.scores[key] = { score, max_score: 100, date, subject };
+    localMutationSeq++;
+    saveLocalStore();
+    await trySync({ t: "scr", date, student_id: studentId, subject, score, max_score: 100 });
 }
 
 async function markAllAttendance(status) {
@@ -945,22 +1019,38 @@ async function saveAttendance() {
         return { date, student_id: stud.student_id, status: state.attendance[key] };
     });
 
+    // Collect any scores entered for this date/section.
+    const scoreRows = [];
+    secStudents.forEach(stud => {
+        ["General"].forEach(subject => {
+            const skey = `${date}_${stud.student_id}_${subject}`;
+            const s = state.scores[skey];
+            if (s && s.score != null && s.score !== "") {
+                scoreRows.push({ date, student_id: stud.student_id, subject, score: s.score, max_score: s.max_score ?? 100 });
+            }
+        });
+    });
+
     localMutationSeq++;
     saveLocalStore();
     loadAttendanceSheet();
 
     if (!cloudReady()) {
-        showToast("Attendance saved on this device (offline).", "success");
+        showToast("Attendance and scores saved on this device (offline).", "success");
         return;
     }
 
     try {
         await flushPendingOps();
         await runWithSessionRetry({ t: "attB", rows });
-        showToast(`Attendance saved and synced to the cloud (${rows.length} students).`, "success");
+        if (scoreRows.length > 0) {
+            await runWithSessionRetry({ t: "scrB", rows: scoreRows });
+        }
+        showToast(`Attendance and scores saved and synced to the cloud (${rows.length} students, ${scoreRows.length} scores).`, "success");
     } catch (err) {
         console.error("Saving attendance failed:", err);
         queueOp({ t: "attB", rows });
+        if (scoreRows.length > 0) queueOp({ t: "scrB", rows: scoreRows });
         showToast("Saved on this device — it will sync automatically when you're back online.", "error");
     }
 }
