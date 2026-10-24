@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v6/);
+    assert.match(sw, /scholog-shell-v7/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -123,8 +123,9 @@ test("the Take Attendance section is written in English only", () => {
     const html = read("main.html");
     const start = html.indexOf('id="view-attendance"');
     assert.ok(start > -1, "attendance view exists");
-    // The attendance view is the last tab, so it runs to the end of the page.
-    const section = html.slice(start);
+    const end = html.indexOf("</section>", start);
+    assert.ok(end > start, "attendance view has a closing tag");
+    const section = html.slice(start, end);
     for (const word of ["walang", "pasok", "piliin", "pindutin", "estudyante", "guro", "kopyahin"]) {
         assert.doesNotMatch(section, new RegExp(`\\b${word}\\b`, "i"), `no Tagalog " ${word} " in Take Attendance`);
     }

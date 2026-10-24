@@ -197,7 +197,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         initDateInput();
         refreshIcons();
         const hashTab = window.location.hash.replace(/^#/, "");
-        const startTab = ["dashboard", "directory", "attendance"].includes(hashTab) ? hashTab : "dashboard";
+        const startTab = ["dashboard", "directory", "attendance", "scores"].includes(hashTab) ? hashTab : "dashboard";
         switchTab(startTab);
         startCloudRefreshLoop();
     } catch (err) {
@@ -674,8 +674,11 @@ function setProfileUI(email, name, avatarUrl) {
 }
 
 function initDateInput() {
-    const dateInput = document.getElementById("att-date");
-    if (dateInput) dateInput.value = todayStr();
+    const today = todayStr();
+    ["att-date", "score-date"].forEach(id => {
+        const dateInput = document.getElementById(id);
+        if (dateInput) dateInput.value = today;
+    });
 }
 
 function refreshIcons() {
@@ -687,7 +690,7 @@ function refreshIcons() {
 // --- Navigation & Tabs ---
 function switchTab(tabName) {
     activeTab = tabName;
-    const views = ["dashboard", "directory", "attendance"];
+    const views = ["dashboard", "directory", "attendance", "scores"];
     views.forEach(view => {
         const section = document.getElementById(`view-${view}`);
         const navBtn = document.getElementById(`nav-${view}`);
@@ -703,6 +706,11 @@ function switchTab(tabName) {
     if (tabName === "attendance") {
         populateSectionDropdowns();
         loadAttendanceSheet();
+        syncLatestFromCloud().catch(() => {});
+    }
+    if (tabName === "scores") {
+        populateSectionDropdowns();
+        loadScoreSheet();
         syncLatestFromCloud().catch(() => {});
     }
     refreshIcons();
@@ -875,10 +883,12 @@ function renderDirectory() {
 // --- Attendance View ---
 function populateSectionDropdowns() {
     const attSelect = document.getElementById("att-section");
+    const scoreSelect = document.getElementById("score-section");
     const studSelect = document.getElementById("stud-section");
     const transferSelect = document.getElementById("transfer-new-section");
 
     const prevAtt = attSelect ? attSelect.value : "";
+    const prevScore = scoreSelect ? scoreSelect.value : "";
     const optionsHTML = state.sections.length > 0
         ? state.sections.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")
         : `<option value="">-- No sections yet --</option>`;
@@ -886,6 +896,10 @@ function populateSectionDropdowns() {
     if (attSelect) {
         attSelect.innerHTML = optionsHTML;
         if (prevAtt && state.sections.includes(prevAtt)) attSelect.value = prevAtt;
+    }
+    if (scoreSelect) {
+        scoreSelect.innerHTML = optionsHTML;
+        if (prevScore && state.sections.includes(prevScore)) scoreSelect.value = prevScore;
     }
     if (studSelect) studSelect.innerHTML = optionsHTML;
     if (transferSelect) transferSelect.innerHTML = optionsHTML;
@@ -899,26 +913,24 @@ function loadAttendanceSheet() {
     tableBody.innerHTML = "";
 
     if (!selectedSec) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
         return;
     }
 
     if (!selectedDate) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
         return;
     }
 
     const secStudents = state.students.filter(s => s.section === selectedSec);
 
     if (secStudents.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="6" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
         return;
     }
 
     secStudents.forEach((stud, idx) => {
         const key = `${selectedDate}_${stud.student_id}`;
-        const scoreKey = `${selectedDate}_${stud.student_id}_General`;
-        const currentScore = state.scores[scoreKey];
         const currentStatus = state.attendance[key] || "Present";
 
         const tr = document.createElement("tr");
@@ -936,12 +948,54 @@ function loadAttendanceSheet() {
                     `).join("")}
                 </div>
             </td>
+        `;
+        tableBody.appendChild(tr);
+    });
+}
+
+// --- Student Scores View ---
+function loadScoreSheet() {
+    const selectedDate = document.getElementById("score-date")?.value || "";
+    const selectedSec = document.getElementById("score-section")?.value || "";
+    const tableBody = document.getElementById("score-table-body");
+    if (!tableBody) return;
+
+    tableBody.innerHTML = "";
+
+    if (!selectedSec) {
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
+        return;
+    }
+
+    if (!selectedDate) {
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
+        return;
+    }
+
+    const secStudents = state.students.filter(s => s.section === selectedSec);
+
+    if (secStudents.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
+        return;
+    }
+
+    secStudents.forEach((stud, idx) => {
+        const scoreKey = `${selectedDate}_${stud.student_id}_General`;
+        const currentScore = state.scores[scoreKey];
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td><strong>${esc(stud.name)}</strong></td>
+            <td class="font-mono">${esc(stud.student_id)}</td>
+            <td>${esc(selectedDate)}</td>
             <td class="text-center">
                 <input type="number" class="score-input" min="0" max="100" step="1"
                     value="${currentScore ? esc(currentScore.score) : ""}"
                     placeholder="0–100"
                     title="Type the student's score (0–100)"
-                    data-key="${selectedDate}_${esc(stud.student_id)}_General"
+                    aria-label="Score for ${esc(stud.name)}"
+                    data-key="${esc(scoreKey)}"
                     onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', 'General', this.value)">
             </td>
         `;
@@ -1035,38 +1089,22 @@ async function saveAttendance() {
         return { date, student_id: stud.student_id, status: state.attendance[key] };
     });
 
-    // Collect any scores entered for this date/section.
-    const scoreRows = [];
-    secStudents.forEach(stud => {
-        ["General"].forEach(subject => {
-            const skey = `${date}_${stud.student_id}_${subject}`;
-            const s = state.scores[skey];
-            if (s && s.score != null && s.score !== "") {
-                scoreRows.push({ date, student_id: stud.student_id, subject, score: s.score, max_score: s.max_score ?? 100 });
-            }
-        });
-    });
-
     localMutationSeq++;
     saveLocalStore();
     loadAttendanceSheet();
 
     if (!cloudReady()) {
-        showToast("Attendance and scores saved on this device (offline).", "success");
+        showToast("Attendance saved on this device (offline).", "success");
         return;
     }
 
     try {
         await flushPendingOps();
         await runWithSessionRetry({ t: "attB", rows });
-        if (scoreRows.length > 0) {
-            await runWithSessionRetry({ t: "scrB", rows: scoreRows });
-        }
-        showToast(`Attendance and scores saved and synced to the cloud (${rows.length} students, ${scoreRows.length} scores).`, "success");
+        showToast(`Attendance saved and synced to the cloud (${rows.length} students).`, "success");
     } catch (err) {
         console.error("Saving attendance failed:", err);
         queueOp({ t: "attB", rows });
-        if (scoreRows.length > 0) queueOp({ t: "scrB", rows: scoreRows });
         showToast("Saved on this device — it will sync automatically when you're back online.", "error");
     }
 }
@@ -1188,6 +1226,7 @@ async function syncLatestFromCloud() {
     saveLocalStore();
     populateSectionDropdowns();
     loadAttendanceSheet();
+    if (activeTab === "scores") loadScoreSheet();
     if (activeTab === "dashboard") renderDashboard();
     if (activeTab === "directory") renderDirectory();
 

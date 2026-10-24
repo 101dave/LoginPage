@@ -11,7 +11,7 @@ Security, cached locally for offline use, and synced automatically when back onl
 | Page | Purpose |
 | --- | --- |
 | `index.html` | Sign in, create account, forgot password, set new password |
-| `main.html` | Teacher dashboard: dashboard, class list, take attendance, daily PDF |
+| `main.html` | Teacher dashboard: dashboard, class list, take attendance, student scores, daily PDF |
 | `scan.html` | **Separate** check-in page: students scan QR / type ID; teachers create and share the session |
 | `privacy.html` | Privacy policy |
 
