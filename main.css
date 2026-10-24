@@ -895,7 +895,7 @@ body.auth-pending {
 .dot-amber { background-color: #f59e0b; }
 .dot-blue { background-color: #3b82f6; }
 
-.status-pill-group { display: inline-flex; flex-wrap: wrap; max-width: 100%; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
+.status-pill-group { display: inline-flex; flex-wrap: nowrap; max-width: 100%; background: var(--border-light); padding: 4px; border-radius: var(--radius-sm); gap: 3px; border: 1px solid var(--border-color); }
 .status-btn {
     padding: 6px 12px;
     font-size: 12px;
@@ -908,6 +908,61 @@ body.auth-pending {
     color: var(--text-muted);
     font-family: inherit;
     transition: var(--transition);
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+/* Phones: the sheet becomes one card per student so nothing needs sideways
+   scrolling, and the four status choices stay in ONE row — never stacked.
+   The table itself still applies from 641px up. */
+@media (max-width: 640px) {
+    #view-attendance .data-table,
+    #view-attendance .data-table tbody { display: block; width: 100%; min-width: 0; }
+    #view-attendance .data-table thead { display: none; }
+
+    #view-attendance .data-table tr {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 4px 10px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        background-color: var(--bg-main);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+    }
+    #view-attendance .data-table tr:last-child { margin-bottom: 0; }
+
+    #view-attendance .data-table td {
+        display: block;
+        padding: 0;
+        border: none;
+        white-space: normal;
+    }
+    #view-attendance .data-table td:nth-child(1) { grid-area: 1 / 1 / 2 / 2; font-size: 12px; color: var(--text-muted); }
+    #view-attendance .data-table td:nth-child(2) { grid-area: 1 / 2 / 2 / 3; font-size: 14px; }
+    #view-attendance .data-table td:nth-child(3) { grid-area: 2 / 1 / 3 / 2; }
+    #view-attendance .data-table td:nth-child(4) { grid-area: 2 / 2 / 3 / 3; text-align: right; }
+    #view-attendance .data-table td.status-cell { grid-area: 3 / 1 / 4 / 3; margin-top: 8px; }
+    #view-attendance .data-table td[colspan] { grid-column: 1 / -1; text-align: center; padding: 6px 0; }
+
+    /* Four equal columns = one row at any phone width. */
+    #view-attendance .status-pill-group {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        width: 100%;
+        max-width: 100%;
+        gap: 4px;
+        padding: 4px;
+        background-color: var(--bg-card);
+    }
+    #view-attendance .status-btn {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        padding: 10px 4px;
+        font-size: 11.5px;
+    }
 }
 .status-btn:hover { color: var(--text-main); }
 .status-btn.active-Present { background-color: var(--status-present-bg); color: #ffffff; }
@@ -1418,7 +1473,10 @@ body.auth-pending {
     .brand span { font-size: 10px; }
     .main-container { padding-left: 0.75rem; padding-right: 0.75rem; }
     .qr-entry-info { min-width: 0; }
-    .status-btn { padding: 6px 8px; font-size: 11px; }
+    .status-btn { padding: 6px 7px; font-size: 11px; }
+    #view-attendance .data-table tr { padding: 10px 12px; }
+    #view-attendance .status-pill-group { gap: 3px; padding: 3px; }
+    #view-attendance .status-btn { padding: 10px 2px; font-size: 11px; }
     .modal-backdrop { padding: 10px; }
     .modal-content { padding: 18px; }
 }
@@ -1444,8 +1502,9 @@ body.auth-pending {
     }
 }
 
-/* Touch devices: give the attendance status buttons a comfortable target. */
-@media (hover: none) {
+/* Touch devices: give the attendance status buttons a comfortable target.
+   On phones the card sheet above already sizes them (single row, 44px). */
+@media (hover: none) and (min-width: 641px) {
     .status-btn { min-height: 42px; padding: 8px 12px; }
     .tab-btn { padding: 9px 14px; }
 }

@@ -865,7 +865,7 @@ function loadAttendanceSheet() {
             <td><strong>${esc(stud.name)}</strong></td>
             <td class="font-mono">${esc(stud.student_id)}</td>
             <td>${esc(selectedDate)}</td>
-            <td class="text-center">
+            <td class="text-center status-cell">
                 <div class="status-pill-group">
                     ${["Present", "Absent", "Late", "Excused"].map(st => `
                         <button onclick="setStudentStatus('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${st}')" class="status-btn ${currentStatus === st ? 'active-' + st : ''}">

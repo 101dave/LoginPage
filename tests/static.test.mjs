@@ -196,3 +196,33 @@ test("the heavy PDF libraries load on demand, not on every page view", () => {
         assert.doesNotMatch(head, /<script src=/, `${page} has no render-blocking external scripts`);
     }
 });
+
+test("take attendance: the four status pills stay on one row on phones", () => {
+    const css = read("main.css");
+
+    // The picker is a single-line segmented control — never a wrapped stack.
+    const group = css.match(/\.status-pill-group\s*\{[^}]*\}/)[0];
+    assert.match(group, /display:\s*inline-flex/);
+    assert.match(group, /flex-wrap:\s*nowrap/, "status pills must not wrap onto a second line");
+    assert.doesNotMatch(css, /\.status-pill-group\s*\{[^}]*flex-wrap:\s*wrap/);
+
+    // Each pill keeps its own width and its label on one line.
+    const btn = css.match(/\.status-btn\s*\{[^}]*\}/)[0];
+    assert.match(btn, /flex:\s*0 0 auto/);
+    assert.match(btn, /white-space:\s*nowrap/);
+
+    // Phones: one card per student (no sideways scrolling) and the picker is a
+    // 4-column grid, so all four choices share a single row.
+    const phone = css.match(/@media \(max-width: 640px\)\s*\{[\s\S]*?\n\}/)[0];
+    assert.match(phone, /#view-attendance \.data-table thead \{\s*display: none;/);
+    assert.match(phone, /#view-attendance \.data-table,[\s\S]*?min-width: 0/);
+    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;/);
+    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;[\s\S]*?grid-template-columns: repeat\(4, 1fr\)/);
+    assert.match(phone, /#view-attendance \.status-btn \{[\s\S]*?min-height: 44px/);
+    assert.doesNotMatch(phone, /\.status-pill-group[\s\S]*?flex-wrap:\s*wrap/);
+    assert.match(css, /\.table-responsive\s*\{[^}]*overflow-x:\s*auto/);
+
+    // The status column is tagged so the phone rules can target it.
+    assert.match(read("main.html"), /class="text-center status-col"/);
+    assert.match(read("main.js"), /class="text-center status-cell"/);
+});
