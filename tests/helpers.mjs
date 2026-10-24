@@ -10,6 +10,8 @@ export const ROOT = path.resolve(import.meta.dirname, "..");
 // ---------------------------------------------------------------- fixtures
 
 export function defaultDb() {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     return {
         sections: [
             { id: 1, user_id: "user-1", name: "Grade 11 - STEM" },
@@ -22,10 +24,11 @@ export function defaultDb() {
             { id: "21", user_id: "user-1", student_id: "2026-0101", name: "Mark Lim", email: "", section: "Grade 11 - ABM" }
         ],
         attendance: [
-            { id: 1, user_id: "user-1", date: "2026-10-23", student_id: "2026-0001", status: "Present", subject: "General" },
-            { id: 2, user_id: "user-1", date: "2026-10-23", student_id: "2026-0002", status: "Late", subject: "General" },
-            { id: 3, user_id: "user-1", date: "2026-10-23", student_id: "2026-0003", status: "Absent", subject: "General" }
+            { id: 1, user_id: "user-1", date: today, student_id: "2026-0001", status: "Present", subject: "General" },
+            { id: 2, user_id: "user-1", date: today, student_id: "2026-0002", status: "Late", subject: "General" },
+            { id: 3, user_id: "user-1", date: today, student_id: "2026-0003", status: "Absent", subject: "General" }
         ],
+        scores: [],
         checkin_sessions: []
     };
 }

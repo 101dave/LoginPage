@@ -148,6 +148,49 @@ test("attendance: section selection, sheet rendering and status marking", async 
     }
 });
 
+test("student scores: separate tab saves scores without adding them to attendance", async (t) => {
+    const { window, client, db, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const date = todayStr();
+
+    assert.ok(document.getElementById("nav-scores"), "desktop Student Scores navigation exists");
+    assert.ok(document.getElementById("mob-nav-scores"), "mobile Student Scores navigation exists");
+
+    window.switchTab("scores");
+    await waitFor(() => document.querySelectorAll("#score-table-body tr").length === 3, { label: "score rows" });
+    await sleep(30);
+
+    assert.equal(document.getElementById("view-scores").classList.contains("hidden"), false);
+    assert.equal(document.getElementById("view-attendance").classList.contains("hidden"), true);
+    assert.ok(document.getElementById("nav-scores").classList.contains("active"));
+    assert.equal(document.getElementById("score-date").value, date);
+    assert.equal(document.getElementById("score-section").value, "Grade 11 - STEM");
+
+    const firstScore = document.querySelector("#score-table-body .score-input");
+    assert.ok(firstScore, "score input is in the Student Scores sheet");
+    firstScore.value = "88";
+    firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    await waitFor(() => client.calls.some((c) => c.table === "scores" && c.op === "upsert" && c.payload.score === 88), {
+        label: "score cloud upsert"
+    });
+    const savedScore = db.scores.find((row) => row.student_id === "2026-0001" && row.date === date);
+    assert.equal(savedScore.score, 88);
+    assert.equal(savedScore.max_score, 100);
+
+    window.switchTab("attendance");
+    await waitFor(() => document.querySelectorAll("#att-table-body tr").length === 3, { label: "attendance rows" });
+    assert.equal(document.querySelector("#att-table-body .score-input"), null, "attendance rows have no score inputs");
+    assert.equal(document.querySelectorAll("#view-attendance thead th").length, 5, "attendance keeps only its five columns");
+    assert.doesNotMatch(document.querySelector("#view-attendance thead").textContent, /Score/i);
+
+    client.calls.length = 0;
+    await window.saveAttendance();
+    assert.ok(client.calls.some((c) => c.table === "attendance" && c.op === "upsert"), "attendance still saves");
+    assert.equal(client.calls.some((c) => c.table === "scores" && c.op !== "select"), false, "saving attendance never writes scores");
+});
+
 test("attendance: all-present, save and cloud sync", async (t) => {
     const { window, client, db, dom } = await bootMainApp();
     t.after(() => dom.window.close());

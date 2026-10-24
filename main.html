@@ -40,6 +40,7 @@
                 <button onclick="switchTab('dashboard')" id="nav-dashboard" class="tab-btn active">Dashboard</button>
                 <button onclick="switchTab('directory')" id="nav-directory" class="tab-btn">Class List</button>
                 <button onclick="switchTab('attendance')" id="nav-attendance" class="tab-btn">Take Attendance</button>
+                <button onclick="switchTab('scores')" id="nav-scores" class="tab-btn">Student Scores</button>
             </nav>
 
             <div class="nav-actions">
@@ -77,6 +78,9 @@
             </button>
             <button onclick="switchTab('attendance'); toggleMobileMenu()" id="mob-nav-attendance" class="mob-menu-item">
                 <i data-lucide="calendar-check" style="width: 16px; height: 16px;"></i> Take Attendance
+            </button>
+            <button onclick="switchTab('scores'); toggleMobileMenu()" id="mob-nav-scores" class="mob-menu-item">
+                <i data-lucide="clipboard-check" style="width: 16px; height: 16px;"></i> Student Scores
             </button>
             <div class="mob-menu-divider"></div>
             <button onclick="handleLogout()" class="mob-menu-item text-rose">
@@ -237,7 +241,6 @@
                     <div>
                         <h2>Attendance Sheet Table</h2>
                         <p id="att-sheet-subtitle" style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px;">Mark or review student status for the selected date</p>
-                        <p class="muted" style="margin-top: 4px; font-size: 13px;"><span class="dot dot-blue" style="margin-right: 6px;"></span>Type a score (0–100) in the <strong>Score</strong> column for any student — it saves automatically with attendance.</p>
                     </div>
                     <div class="legend-group">
                         <span><span class="dot dot-emerald"></span>Present</span>
@@ -255,10 +258,54 @@
                                 <th>Student ID</th>
                                 <th>Date</th>
                                 <th class="text-center status-col">Status Selection</th>
-                                <th class="text-center" style="width: 110px;">Score</th>
                             </tr>
                         </thead>
                         <tbody id="att-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= STUDENT SCORES VIEW ================= -->
+        <section id="view-scores" class="view-section hidden">
+            <div class="card filter-card">
+                <div class="filter-flex">
+                    <div class="filter-inputs">
+                        <div class="input-group">
+                            <label for="score-date"><i data-lucide="calendar" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Date</label>
+                            <input type="date" id="score-date" onchange="loadScoreSheet()" class="form-control">
+                        </div>
+                        <div class="input-group">
+                            <label for="score-section"><i data-lucide="users" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Section</label>
+                            <select id="score-section" onchange="loadScoreSheet()" class="form-control"></select>
+                        </div>
+                    </div>
+                </div>
+                <p class="attendance-note">
+                    Enter a score from <strong>0 to 100</strong> for each student. Every score saves automatically when you leave its input field.
+                </p>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h2>Student Score Sheet</h2>
+                        <p id="score-sheet-subtitle" style="margin-top: 4px;">Record student scores for the selected date and section</p>
+                    </div>
+                    <span class="badge badge-blue">Out of 100</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;">#</th>
+                                <th>Student Name</th>
+                                <th>Student ID</th>
+                                <th>Date</th>
+                                <th class="text-center" style="width: 130px;">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="score-table-body"></tbody>
                     </table>
                 </div>
             </div>
