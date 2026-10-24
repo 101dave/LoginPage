@@ -1478,6 +1478,28 @@ body.auth-pending {
     .data-table { min-width: 560px; }
 }
 
+/* Student Scores: grading-period filters and flexible raw-score maximums */
+@media (min-width: 1000px) {
+    #view-scores .filter-inputs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.score-entry-group {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.score-max-label {
+    min-width: 48px;
+    color: var(--text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: left;
+}
+
 /* Score input in the dedicated Student Scores sheet */
 .score-input {
     width: 88px;

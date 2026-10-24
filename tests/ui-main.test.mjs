@@ -148,7 +148,7 @@ test("attendance: section selection, sheet rendering and status marking", async 
     }
 });
 
-test("student scores: separate tab saves scores without adding them to attendance", async (t) => {
+test("student scores: custom maximum and grading period save separately from attendance", async (t) => {
     const { window, client, db, dom } = await bootMainApp();
     t.after(() => dom.window.close());
     const document = window.document;
@@ -167,17 +167,52 @@ test("student scores: separate tab saves scores without adding them to attendanc
     assert.equal(document.getElementById("score-date").value, date);
     assert.equal(document.getElementById("score-section").value, "Grade 11 - STEM");
 
+    const periodSelect = document.getElementById("score-period");
+    assert.equal(periodSelect.options.length, 7, "Unassigned, four quarters and two semesters are available");
+    periodSelect.value = "Quarter 2";
+    periodSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.equal(document.getElementById("score-period-badge").textContent, "Quarter 2");
+
+    const maxInput = document.getElementById("score-max");
+    maxInput.value = "50";
+    maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.equal(document.querySelector("#score-table-body .score-max-label").textContent, "/ 50");
+
     const firstScore = document.querySelector("#score-table-body .score-input");
     assert.ok(firstScore, "score input is in the Student Scores sheet");
-    firstScore.value = "88";
+    assert.equal(firstScore.max, "50");
+    firstScore.value = "40";
     firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
 
-    await waitFor(() => client.calls.some((c) => c.table === "scores" && c.op === "upsert" && c.payload.score === 88), {
+    await waitFor(() => client.calls.some((c) => c.table === "scores" && c.op === "upsert" && c.payload.score === 40), {
         label: "score cloud upsert"
     });
-    const savedScore = db.scores.find((row) => row.student_id === "2026-0001" && row.date === date);
-    assert.equal(savedScore.score, 88);
-    assert.equal(savedScore.max_score, 100);
+    const savedScore = db.scores.find((row) => row.student_id === "2026-0001" && row.date === date && row.subject === "Quarter 2");
+    assert.equal(savedScore.score, 40);
+    assert.equal(savedScore.max_score, 50);
+
+    periodSelect.value = "Semester 1";
+    window.loadScoreSheet();
+    assert.equal(document.querySelector("#score-table-body .score-input").value, "", "another grading period has its own blank sheet");
+    assert.equal(document.getElementById("score-max").value, "100");
+    periodSelect.value = "Quarter 2";
+    window.loadScoreSheet();
+    assert.equal(document.querySelector("#score-table-body .score-input").value, "40", "the quarter score is restored");
+    assert.equal(document.getElementById("score-max").value, "50", "the custom maximum is restored");
+
+    maxInput.value = "45";
+    maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => client.calls.some((c) => c.table === "scores" && c.op === "upsert" && Array.isArray(c.payload) && c.payload[0].max_score === 45), {
+        label: "existing scores receive the new maximum"
+    });
+    assert.equal(savedScore.max_score, 45);
+    assert.equal(document.querySelector("#score-table-body .score-max-label").textContent, "/ 45");
+
+    const secondScore = document.querySelectorAll("#score-table-body .score-input")[1];
+    secondScore.value = "60";
+    secondScore.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.match(document.querySelector(".toast-error").textContent, /between 0 and 45/);
+    assert.equal(db.scores.some((row) => row.student_id === "2026-0002" && row.subject === "Quarter 2"), false, "scores above the maximum are rejected");
 
     window.switchTab("attendance");
     await waitFor(() => document.querySelectorAll("#att-table-body tr").length === 3, { label: "attendance rows" });

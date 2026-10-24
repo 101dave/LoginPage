@@ -107,8 +107,8 @@ function parseAttKey(key) {
 function parseScoreKey(key) {
     // Key format: YYYY-MM-DD_STUDENTID_SUBJECT
     // Date is always 10 chars (YYYY-MM-DD), then "_", then studentId, then "_", then subject.
-    // Use the LAST underscore to split subject (subjects like "General" never contain "_"),
-    // so student_id values that contain "_" are preserved correctly.
+    // Use the LAST underscore to split the stored grading period (values such as
+    // "General" and "Quarter 1" never contain "_"), so student IDs with "_" survive.
     if (key.length < 12) return { date: "", studentId: "", subject: "" };
     const date = key.slice(0, 10);
     if (key.charAt(10) !== "_") return { date: "", studentId: "", subject: "" };
@@ -954,11 +954,26 @@ function loadAttendanceSheet() {
 }
 
 // --- Student Scores View ---
+// The existing scores schema includes `subject` in its unique key. We store the
+// grading period there so Quarter/Semester records stay separate without a schema
+// change. Legacy "General" scores remain available under Unassigned.
 function loadScoreSheet() {
     const selectedDate = document.getElementById("score-date")?.value || "";
     const selectedSec = document.getElementById("score-section")?.value || "";
+    const selectedPeriod = document.getElementById("score-period")?.value || "General";
     const tableBody = document.getElementById("score-table-body");
+    const maxInput = document.getElementById("score-max");
     if (!tableBody) return;
+
+    const periodLabel = selectedPeriod === "General" ? "Unassigned" : selectedPeriod;
+    const badge = document.getElementById("score-period-badge");
+    const subtitle = document.getElementById("score-sheet-subtitle");
+    if (badge) badge.textContent = periodLabel;
+    if (subtitle) {
+        subtitle.textContent = selectedSec
+            ? `${periodLabel} · ${selectedSec}`
+            : "Record student scores for the selected date and section";
+    }
 
     tableBody.innerHTML = "";
 
@@ -973,6 +988,16 @@ function loadScoreSheet() {
     }
 
     const secStudents = state.students.filter(s => s.section === selectedSec);
+    const firstSavedScore = secStudents
+        .map(stud => state.scores[`${selectedDate}_${stud.student_id}_${selectedPeriod}`])
+        .find(Boolean);
+    const savedMaximum = Number(firstSavedScore?.max_score);
+    const sheetMaximum = Number.isFinite(savedMaximum) && savedMaximum > 0 ? savedMaximum : 100;
+
+    if (maxInput) {
+        maxInput.value = String(sheetMaximum);
+        maxInput.dataset.previousValue = String(sheetMaximum);
+    }
 
     if (secStudents.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
@@ -980,8 +1005,12 @@ function loadScoreSheet() {
     }
 
     secStudents.forEach((stud, idx) => {
-        const scoreKey = `${selectedDate}_${stud.student_id}_General`;
+        const scoreKey = `${selectedDate}_${stud.student_id}_${selectedPeriod}`;
         const currentScore = state.scores[scoreKey];
+        const currentMaxValue = Number(currentScore?.max_score);
+        const currentMaximum = Number.isFinite(currentMaxValue) && currentMaxValue > 0
+            ? currentMaxValue
+            : sheetMaximum;
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -990,13 +1019,17 @@ function loadScoreSheet() {
             <td class="font-mono">${esc(stud.student_id)}</td>
             <td>${esc(selectedDate)}</td>
             <td class="text-center">
-                <input type="number" class="score-input" min="0" max="100" step="1"
-                    value="${currentScore ? esc(currentScore.score) : ""}"
-                    placeholder="0–100"
-                    title="Type the student's score (0–100)"
-                    aria-label="Score for ${esc(stud.name)}"
-                    data-key="${esc(scoreKey)}"
-                    onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', 'General', this.value)">
+                <div class="score-entry-group">
+                    <input type="number" class="score-input" min="0" max="${esc(currentMaximum)}" step="any"
+                        value="${currentScore ? esc(currentScore.score) : ""}"
+                        placeholder="Score"
+                        title="Type a score from 0 to ${esc(currentMaximum)}"
+                        aria-label="Score for ${esc(stud.name)}"
+                        data-key="${esc(scoreKey)}"
+                        data-max-score="${esc(currentMaximum)}"
+                        onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', this.value, this.dataset.maxScore)">
+                    <span class="score-max-label">/ ${esc(currentMaximum)}</span>
+                </div>
             </td>
         `;
         tableBody.appendChild(tr);
@@ -1013,24 +1046,111 @@ async function setStudentStatus(date, studentId, status) {
     await trySync({ t: "att", date, student_id: studentId, status });
 }
 
-async function setStudentScore(date, studentId, subject, scoreValue) {
-    if (!isValidDateStr(date) || !studentId || !subject) return;
-    const score = Number(scoreValue);
-    if (!Number.isFinite(score)) return;
-    if (score < 0 || score > 100) {
-        showToast("Score must be between 0 and 100.", "error");
-        return;
+async function updateScoreMaximum(maxScoreValue) {
+    const maxInput = document.getElementById("score-max");
+    if (!maxInput) return false;
+
+    const previousMaximum = Number(maxInput.dataset.previousValue) || 100;
+    const maxScore = Number(maxScoreValue);
+    if (!Number.isFinite(maxScore) || maxScore <= 0) {
+        maxInput.value = String(previousMaximum);
+        showToast("Max score must be greater than 0.", "error");
+        return false;
     }
-    const key = `${date}_${studentId}_${subject}`;
-    state.scores[key] = { score, max_score: 100, date, subject };
+
+    const date = document.getElementById("score-date")?.value || "";
+    const sec = document.getElementById("score-section")?.value || "";
+    const gradingPeriod = document.getElementById("score-period")?.value || "General";
+    if (!isValidDateStr(date) || !sec) {
+        maxInput.value = String(previousMaximum);
+        showToast("Select a valid date and section first.", "error");
+        return false;
+    }
+
+    const secStudents = state.students.filter(s => s.section === sec);
+    const savedRecords = secStudents.map(stud => {
+        const key = `${date}_${stud.student_id}_${gradingPeriod}`;
+        return { key, studentId: stud.student_id, value: state.scores[key] };
+    }).filter(record => record.value);
+
+    const highestScore = savedRecords.reduce((highest, record) => {
+        const value = Number(record.value.score);
+        return Number.isFinite(value) ? Math.max(highest, value) : highest;
+    }, 0);
+    if (highestScore > maxScore) {
+        maxInput.value = String(previousMaximum);
+        showToast(`Max score cannot be lower than an entered score (${highestScore}).`, "error");
+        return false;
+    }
+
+    maxInput.value = String(maxScore);
+    maxInput.dataset.previousValue = String(maxScore);
+    document.querySelectorAll("#score-table-body .score-input").forEach(input => {
+        input.max = String(maxScore);
+        input.dataset.maxScore = String(maxScore);
+        input.title = `Type a score from 0 to ${maxScore}`;
+    });
+    document.querySelectorAll("#score-table-body .score-max-label").forEach(label => {
+        label.textContent = `/ ${maxScore}`;
+    });
+
+    if (savedRecords.length > 0) {
+        savedRecords.forEach(record => {
+            state.scores[record.key] = { ...record.value, max_score: maxScore };
+        });
+        localMutationSeq++;
+        saveLocalStore();
+
+        if (cloudReady()) {
+            const rows = savedRecords.map(record => ({
+                date,
+                student_id: record.studentId,
+                subject: gradingPeriod,
+                score: Number(record.value.score),
+                max_score: maxScore
+            }));
+            const synced = await trySync({ t: "scrB", rows });
+            if (!synced) return false;
+        }
+    }
+
+    showToast(savedRecords.length > 0
+        ? `Max score updated to ${maxScore} for ${savedRecords.length} saved score${savedRecords.length === 1 ? "" : "s"}.`
+        : `Max score set to ${maxScore}.`, "success");
+    return true;
+}
+
+async function setStudentScore(date, studentId, gradingPeriod, scoreValue, maxScoreValue = 100) {
+    if (!isValidDateStr(date) || !studentId || !gradingPeriod) return false;
+    if (String(scoreValue ?? "").trim() === "") return false;
+
+    const score = Number(scoreValue);
+    const maxScore = Number(maxScoreValue);
+    if (!Number.isFinite(score)) return false;
+    if (!Number.isFinite(maxScore) || maxScore <= 0) {
+        showToast("Max score must be greater than 0.", "error");
+        return false;
+    }
+    if (score < 0 || score > maxScore) {
+        showToast(`Score must be between 0 and ${maxScore}.`, "error");
+        return false;
+    }
+
+    const key = `${date}_${studentId}_${gradingPeriod}`;
+    state.scores[key] = { score, max_score: maxScore, date, subject: gradingPeriod };
     localMutationSeq++;
     saveLocalStore();
-    try {
-        await trySync({ t: "scr", date, student_id: studentId, subject, score, max_score: 100 });
-        showToast(`Score saved: ${score}/100`, "success");
-    } catch (err) {
-        showToast("Score saved locally — will sync when you're back online.", "error");
+
+    if (cloudReady()) {
+        const synced = await trySync({
+            t: "scr", date, student_id: studentId, subject: gradingPeriod,
+            score, max_score: maxScore
+        });
+        if (!synced) return false;
     }
+
+    showToast(`Score saved: ${score}/${maxScore}`, "success");
+    return true;
 }
 
 async function markAllAttendance(status) {
