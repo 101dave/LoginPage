@@ -211,16 +211,16 @@ test("take attendance: the four status pills stay on one row on phones", () => {
     assert.match(btn, /flex:\s*0 0 auto/);
     assert.match(btn, /white-space:\s*nowrap/);
 
-    // Phones get a compact picker (smaller padding/type) rather than a wrapped one,
-    // and the sheet scrolls sideways so the single row always has room.
+    // Phones: one card per student (no sideways scrolling) and the picker is a
+    // 4-column grid, so all four choices share a single row.
     const phone = css.match(/@media \(max-width: 640px\)\s*\{[\s\S]*?\n\}/)[0];
-    assert.match(phone, /\.status-pill-group\s*\{[^}]*padding:\s*3px/);
-    assert.match(phone, /\.status-btn\s*\{[^}]*font-size:\s*11px/);
-    assert.match(phone, /\.status-cell\s*\{[^}]*min-width/);
+    assert.match(phone, /#view-attendance \.data-table thead \{\s*display: none;/);
+    assert.match(phone, /#view-attendance \.data-table,[\s\S]*?min-width: 0/);
+    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;/);
+    assert.match(phone, /#view-attendance \.status-pill-group \{\s*display: grid;[\s\S]*?grid-template-columns: repeat\(4, 1fr\)/);
+    assert.match(phone, /#view-attendance \.status-btn \{[\s\S]*?min-height: 44px/);
+    assert.doesNotMatch(phone, /\.status-pill-group[\s\S]*?flex-wrap:\s*wrap/);
     assert.match(css, /\.table-responsive\s*\{[^}]*overflow-x:\s*auto/);
-
-    // Touch screens keep the tall tap target without re-widening the pills.
-    assert.match(css, /@media \(hover: none\) and \(max-width: 640px\)\s*\{\s*\.status-btn\s*\{[^}]*padding:\s*8px 8px/);
 
     // The status column is tagged so the phone rules can target it.
     assert.match(read("main.html"), /class="text-center status-col"/);
