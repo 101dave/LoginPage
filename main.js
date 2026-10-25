@@ -3127,67 +3127,6 @@ function triggerCsvSave(filename, rows) {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function saveAttendanceCsv() {
-    const date = document.getElementById("att-date")?.value || todayStr();
-    const sec = document.getElementById("att-section")?.value || "";
-    if (!sec) {
-        showToast("Please select a section first.", "error");
-        return;
-    }
-    const secStudents = state.students.filter(s => s.section === sec);
-    if (secStudents.length === 0) {
-        showToast("There are no students in this section to save.", "error");
-        return;
-    }
-
-    const countsByCode = new Map();
-    Object.keys(state.attendance).forEach(k => {
-        const { studentId } = parseAttKey(k);
-        const st = state.attendance[k];
-        if (!studentId || !st) return;
-        if (!countsByCode.has(studentId)) {
-            countsByCode.set(studentId, { Present: 0, Late: 0, Absent: 0, Excused: 0 });
-        }
-        const entry = countsByCode.get(studentId);
-        if (entry[st] !== undefined) entry[st]++;
-    });
-
-    const header = [
-        "Student ID",
-        "Student Name",
-        "Section",
-        `${date} Status`,
-        "Total Present",
-        "Total Late",
-        "Total Absent",
-        "Total Excused",
-        "Attendance Rate (%)"
-    ];
-    const rows = [header];
-
-    secStudents.forEach(stud => {
-        const dayStatus = state.attendance[`${date}_${stud.student_id}`] || "Unrecorded (Default Present)";
-        const c = countsByCode.get(stud.student_id) || { Present: 0, Late: 0, Absent: 0, Excused: 0 };
-        const totalDays = c.Present + c.Late + c.Absent + c.Excused;
-        const rate = totalDays > 0 ? Math.round(((c.Present + c.Late) / totalDays) * 100) : 100;
-        rows.push([
-            stud.student_id,
-            stud.name,
-            stud.section,
-            dayStatus,
-            c.Present,
-            c.Late,
-            c.Absent,
-            c.Excused,
-            `${rate}%`
-        ]);
-    });
-
-    const safeSec = sec.replace(/[^a-z0-9_-]+/gi, "_");
-    triggerCsvSave(`Attendance_${safeSec}_${date}.csv`, rows);
-    showToast(`Attendance CSV saved (${secStudents.length} students).`, "success");
-}
-
 function saveScoreSheetCsv() {
     const date = document.getElementById("score-date")?.value || todayStr();
     const sec = document.getElementById("score-section")?.value || "";
