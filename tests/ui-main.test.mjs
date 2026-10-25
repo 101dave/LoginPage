@@ -615,3 +615,182 @@ test("the mobile menu toggle keeps aria-expanded in sync", async (t) => {
     assert.equal(menu.classList.contains("hidden"), true);
     assert.equal(trigger.getAttribute("aria-expanded"), "false");
 });
+
+test("offline score replay reconciles backfilled categories and self-heals missing category rows", async (t) => {
+    const db = dbWithToday();
+    const backfilledId = "1e4eaa85-e640-44e1-ade6-bb7f3d8ef605";
+    db.grading_categories = [
+        { id: backfilledId, user_id: "user-1", name: "General", weight: 100 }
+    ];
+    db.section_grading_categories = [
+        { id: 1, user_id: "user-1", section: "Grade 11 - STEM", category_id: backfilledId },
+        { id: 2, user_id: "user-1", section: "Grade 11 - ABM", category_id: backfilledId }
+    ];
+    db.scores = [
+        {
+            id: 1,
+            user_id: "user-1",
+            date: "2026-10-24",
+            student_id: "2026-0001",
+            subject: "General",
+            grading_period: "General",
+            category_id: backfilledId,
+            category_name: "General",
+            category_weight: 100,
+            score: 89,
+            max_score: 100
+        }
+    ];
+
+    const queuedCategories = [
+        { id: "5286d18a-f6c5-4258-b9f0-81ab8b369261", name: "Written Work", weight: 25 },
+        { id: "f70fb10a-5d8e-4eda-988d-fbfb9be6ca80", name: "Performance Task", weight: 35 },
+        { id: "0431b045-c56e-415b-9c95-4fa0269cc3c8", name: "Quarterly Exam", weight: 25 },
+        { id: "f09c44ea-94f1-4130-870c-0cf0b11b352a", name: "Project", weight: 15 }
+    ];
+    const pendingOps = queuedCategories.map((cat, idx) => ({
+        t: "scr",
+        date: "2026-10-24",
+        student_id: "2026-0001",
+        grading_period: "General",
+        category_id: cat.id,
+        category_name: cat.name,
+        category_weight: cat.weight,
+        score: 80 + idx * 5,
+        max_score: 100
+    }));
+
+    const client = createFakeSupabase({ db, enforceGradingConstraints: true });
+    const pdf = makeFakeJsPdf();
+    const qr = makeFakeQr();
+    const page = loadPage({
+        html: "main.html",
+        scripts: ["pdf.js", "main.js"],
+        url: "https://scholog.test/main.html",
+        beforeParse(window) {
+            installSupabaseStub(window, client);
+            installLucideStub(window);
+            window.qrcode = qr;
+            window.jspdf = { jsPDF: pdf.FakeJsPDF };
+            window.localStorage.setItem("scholog_app_data_user-1_pending", JSON.stringify(pendingOps));
+        }
+    });
+    t.after(() => page.dom.window.close());
+
+    await waitFor(() => {
+        const remaining = JSON.parse(page.window.localStorage.getItem("scholog_app_data_user-1_pending") || "[]");
+        return remaining.length === 0;
+    }, { label: "offline score queue flushed" });
+
+    assert.equal(db.scores.length, 5, "historical score + four replayed category scores are all stored");
+    for (const cat of queuedCategories) {
+        assert.ok(db.grading_categories.some((c) => c.id === cat.id && c.name === cat.name), `created category ${cat.name}`);
+        assert.ok(db.scores.some((s) => s.category_id === cat.id && s.student_id === "2026-0001"), `synced score for ${cat.name}`);
+    }
+    const totalWeight = db.grading_categories.reduce((sum, c) => sum + Number(c.weight), 0);
+    assert.equal(totalWeight, 100, "backfilled placeholder weight was retired so global weights remain 100%");
+});
+
+test("offline gradingConfig replay merges same-name backfilled category and preserves unsynced edits on failure", async (t) => {
+    const db = dbWithToday();
+    const backfilledId = "1e4eaa85-e640-44e1-ade6-bb7f3d8ef605";
+    db.grading_categories = [
+        { id: backfilledId, user_id: "user-1", name: "General", weight: 100 }
+    ];
+    db.scores = [
+        {
+            id: 1,
+            user_id: "user-1",
+            date: "2026-10-24",
+            student_id: "2026-0001",
+            subject: "General",
+            grading_period: "General",
+            category_id: backfilledId,
+            category_name: "General",
+            category_weight: 100,
+            score: 89,
+            max_score: 100
+        }
+    ];
+
+    const clientGeneralId = "5286d18a-f6c5-4258-b9f0-81ab8b369261";
+    const clientQuizId = "f70fb10a-5d8e-4eda-988d-fbfb9be6ca80";
+    const pendingOps = [
+        {
+            t: "gradingConfig",
+            section: "Grade 11 - STEM",
+            categories: [
+                { id: clientGeneralId, name: "General", weight: 40 },
+                { id: clientQuizId, name: "Quizzes", weight: 60 }
+            ],
+            selectedIds: [clientGeneralId, clientQuizId]
+        },
+        {
+            t: "scr",
+            date: "2026-10-24",
+            student_id: "2026-0001",
+            grading_period: "General",
+            category_id: clientQuizId,
+            category_name: "Quizzes",
+            category_weight: 60,
+            score: 95,
+            max_score: 100
+        }
+    ];
+
+    // First boot while scores writes are failing: unsynced scores must stay cached locally.
+    const failingClient = createFakeSupabase({ db, failTable: "scores", enforceGradingConstraints: true });
+    const firstLoad = loadPage({
+        html: "main.html",
+        scripts: ["pdf.js", "main.js"],
+        url: "https://scholog.test/main.html#scores",
+        beforeParse(window) {
+            installSupabaseStub(window, failingClient);
+            installLucideStub(window);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+            window.localStorage.setItem("scholog_app_data_user-1_pending", JSON.stringify(pendingOps));
+        }
+    });
+    t.after(() => firstLoad.dom.window.close());
+
+    await waitFor(() => firstLoad.window.document.getElementById("stat-total").textContent !== "0"
+        || !firstLoad.window.document.getElementById("view-scores").classList.contains("hidden"));
+    await sleep(60);
+
+    const remainingAfterFailure = JSON.parse(firstLoad.window.localStorage.getItem("scholog_app_data_user-1_pending") || "[]");
+    assert.equal(remainingAfterFailure.length, 2, "failed ops remain queued for retry");
+    const cachedAfterFailure = JSON.parse(firstLoad.window.localStorage.getItem("scholog_app_data_user-1") || "{}");
+    assert.ok(
+        Object.values(cachedAfterFailure.scores || {}).some((s) => s.category_id === clientQuizId && s.score === 95),
+        "unsynced offline score is preserved in local cache across reload"
+    );
+
+    // Second boot once backend is healthy: everything flushes cleanly without duplicate name collision.
+    const healthyClient = createFakeSupabase({ db, enforceGradingConstraints: true });
+    const secondLoad = loadPage({
+        html: "main.html",
+        scripts: ["pdf.js", "main.js"],
+        url: "https://scholog.test/main.html#scores",
+        beforeParse(window) {
+            installSupabaseStub(window, healthyClient);
+            installLucideStub(window);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+            window.localStorage.setItem("scholog_app_data_user-1", JSON.stringify(cachedAfterFailure));
+            window.localStorage.setItem("scholog_app_data_user-1_pending", JSON.stringify(remainingAfterFailure));
+        }
+    });
+    t.after(() => secondLoad.dom.window.close());
+
+    await waitFor(() => {
+        const remaining = JSON.parse(secondLoad.window.localStorage.getItem("scholog_app_data_user-1_pending") || "[]");
+        return remaining.length === 0;
+    }, { label: "pending queue emptied after backend recovery" });
+
+    assert.equal(db.grading_categories.length, 2);
+    assert.equal(db.grading_categories.some((c) => c.id === backfilledId), false, "merged away old backfilled ID");
+    assert.equal(db.scores.find((s) => s.score === 89).category_id, clientGeneralId, "historical General score re-linked to client General ID");
+    assert.ok(db.scores.some((s) => s.category_id === clientQuizId && s.score === 95), "queued Quizzes score synced");
+});
+

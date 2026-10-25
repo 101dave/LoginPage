@@ -150,6 +150,8 @@ test("grading migration preserves scores and matches category-id writes", () => 
     assert.match(sql, /update public\.scores s[\s\S]*category_id = coalesce/);
     assert.match(sql, /on public\.scores \(user_id, date, student_id, grading_period, category_id\)/);
     assert.match(sql, /drop function if exists public\.upsert_score/);
+    assert.match(sql, /udt_name <> 'uuid'/);
+    assert.match(sql, /notify pgrst, 'reload schema'/);
     assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id"/);
 });
 

@@ -1,6 +1,97 @@
 -- Scholog — shared grading categories, per-section selection and weighted grades.
 -- Existing score rows are preserved and backfilled with category metadata.
 
+-- Upgrade legacy prototype tables whose category IDs used bigint instead of uuid.
+do $$
+begin
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'grading_categories'
+          and column_name = 'id'
+          and udt_name <> 'uuid'
+    ) then
+        create temp table _legacy_grading_categories on commit drop as
+        select
+            gen_random_uuid() as new_id,
+            id as old_id,
+            user_id,
+            name,
+            least(greatest(coalesce(weight, 0), 0), 100) as weight,
+            coalesce(created_at, now()) as created_at,
+            coalesce(updated_at, now()) as updated_at
+        from public.grading_categories;
+
+        if to_regclass('public.section_grading_categories') is not null then
+            create temp table _legacy_section_grading_categories on commit drop as
+            select distinct
+                sgc.user_id,
+                coalesce(sgc.section, sec.name) as section,
+                lgc.new_id as category_id,
+                coalesce(sgc.created_at, now()) as created_at
+            from public.section_grading_categories sgc
+            join _legacy_grading_categories lgc on lgc.old_id = sgc.category_id
+            left join public.sections sec on sec.id = sgc.section_id
+            where coalesce(sgc.section, sec.name) is not null;
+        else
+            create temp table _legacy_section_grading_categories (
+                user_id uuid,
+                section text,
+                category_id uuid,
+                created_at timestamptz
+            ) on commit drop;
+        end if;
+
+        drop table if exists public.section_grading_categories cascade;
+        drop table if exists public.grading_categories cascade;
+
+        create table public.grading_categories (
+            id uuid primary key default gen_random_uuid(),
+            user_id uuid not null references auth.users(id) on delete cascade,
+            name text not null,
+            weight numeric not null default 0 check (weight >= 0 and weight <= 100),
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now(),
+            unique (user_id, name)
+        );
+
+        create table public.section_grading_categories (
+            id bigserial primary key,
+            user_id uuid not null references auth.users(id) on delete cascade,
+            section text not null,
+            category_id uuid not null references public.grading_categories(id) on delete cascade,
+            created_at timestamptz not null default now(),
+            unique (user_id, section, category_id)
+        );
+
+        insert into public.grading_categories (id, user_id, name, weight, created_at, updated_at)
+        select new_id, user_id, name, weight, created_at, updated_at
+        from _legacy_grading_categories
+        on conflict (user_id, name) do nothing;
+
+        insert into public.section_grading_categories (user_id, section, category_id, created_at)
+        select s.user_id, s.section, c.id, s.created_at
+        from _legacy_section_grading_categories s
+        join _legacy_grading_categories lgc on lgc.new_id = s.category_id
+        join public.grading_categories c on c.user_id = s.user_id and c.name = lgc.name
+        on conflict (user_id, section, category_id) do nothing;
+
+        drop table if exists _legacy_section_grading_categories;
+        drop table if exists _legacy_grading_categories;
+    elsif exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'section_grading_categories'
+          and column_name = 'category_id'
+          and udt_name <> 'uuid'
+    ) then
+        drop table if exists public.section_grading_categories cascade;
+    end if;
+end;
+$$;
+
 create table if not exists public.grading_categories (
     id uuid primary key default gen_random_uuid(),
     user_id uuid not null references auth.users(id) on delete cascade,
@@ -22,19 +113,23 @@ create table if not exists public.section_grading_categories (
 
 alter table public.grading_categories enable row level security;
 alter table public.section_grading_categories enable row level security;
+alter table public.scores enable row level security;
 
 revoke all on public.grading_categories from anon;
 revoke all on public.section_grading_categories from anon;
+revoke all on public.scores from anon;
 grant select, insert, update, delete on public.grading_categories to authenticated;
 grant select, insert, update, delete on public.section_grading_categories to authenticated;
 grant usage, select on sequence public.section_grading_categories_id_seq to authenticated;
 
+drop policy if exists own_grading_categories_all on public.grading_categories;
 drop policy if exists grading_categories_teacher_all on public.grading_categories;
 create policy grading_categories_teacher_all on public.grading_categories
     for all to authenticated
     using (auth.uid() = user_id)
     with check (auth.uid() = user_id);
 
+drop policy if exists own_section_grading_categories_all on public.section_grading_categories;
 drop policy if exists section_grading_categories_teacher_all on public.section_grading_categories;
 create policy section_grading_categories_teacher_all on public.section_grading_categories
     for all to authenticated
@@ -44,6 +139,10 @@ create policy section_grading_categories_teacher_all on public.section_grading_c
 -- The teacher app writes scores directly. Keep every score private to its owner.
 grant select, insert, update, delete on public.scores to authenticated;
 grant usage, select on sequence public.scores_id_seq to authenticated;
+drop policy if exists "Users can delete their own scores" on public.scores;
+drop policy if exists "Users can insert their own scores" on public.scores;
+drop policy if exists "Users can update their own scores" on public.scores;
+drop policy if exists "Users can view their own scores" on public.scores;
 drop policy if exists scores_teacher_all on public.scores;
 create policy scores_teacher_all on public.scores
     for all to authenticated
@@ -62,7 +161,7 @@ with source_categories as (
         s.user_id,
         case
             when position('|' in coalesce(s.subject, '')) > 0
-                then split_part(s.subject, '|', 2)
+                then coalesce(nullif(btrim(split_part(s.subject, '|', 2)), ''), 'General')
             else 'General'
         end as name
     from public.scores s
@@ -93,15 +192,15 @@ set
         s.grading_period,
         case
             when position('|' in coalesce(s.subject, '')) > 0
-                then split_part(s.subject, '|', 1)
-            else coalesce(s.subject, 'General')
+                then coalesce(nullif(btrim(split_part(s.subject, '|', 1)), ''), 'General')
+            else coalesce(nullif(btrim(s.subject), ''), 'General')
         end
     ),
     category_name = coalesce(
         s.category_name,
         case
             when position('|' in coalesce(s.subject, '')) > 0
-                then split_part(s.subject, '|', 2)
+                then coalesce(nullif(btrim(split_part(s.subject, '|', 2)), ''), 'General')
             else 'General'
         end
     ),
@@ -111,7 +210,7 @@ from public.grading_categories c
 where c.user_id = s.user_id
   and c.name = case
         when position('|' in coalesce(s.subject, '')) > 0
-            then split_part(s.subject, '|', 2)
+            then coalesce(nullif(btrim(split_part(s.subject, '|', 2)), ''), 'General')
         else 'General'
     end;
 
@@ -135,6 +234,7 @@ join public.grading_categories c on c.user_id = sec.user_id
 on conflict (user_id, section, category_id) do nothing;
 
 alter table public.scores drop constraint if exists scores_user_id_date_student_id_subject_key;
+drop index if exists public.scores_user_id_date_student_id_subject_key;
 create unique index if not exists scores_user_date_student_period_category_key
     on public.scores (user_id, date, student_id, grading_period, category_id);
 
@@ -209,3 +309,6 @@ $$;
 
 revoke all on function public.get_student_record(text, uuid) from public;
 grant execute on function public.get_student_record(text, uuid) to anon, authenticated, service_role;
+
+-- Refresh PostgREST schema cache immediately so REST upserts see new columns.
+notify pgrst, 'reload schema';
