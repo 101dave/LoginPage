@@ -46,6 +46,10 @@ alter table public.scores
     alter column item_id set default 'item-1',
     alter column item_id set not null;
 
+alter table public.scores
+    drop constraint if exists scores_user_date_student_period_category_key;
+
+drop index if exists public.scores_user_date_student_period_category_key;
 drop index if exists public.scores_user_date_student_period_category_idx;
 
 create unique index if not exists scores_user_date_student_period_cat_item_idx

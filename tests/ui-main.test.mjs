@@ -1048,4 +1048,93 @@ test("student scores: categories support multiple subsections (e.g. 6 Written Wo
     assert.equal(db.scores.filter(s => s.student_id === "2026-0001" && s.date === "2026-10-26").length, 4, "newly entered subsections stamped with current date");
 });
 
+test("offline queue replays multiple subsection scores on the same date and category name swaps without 409 conflicts", async (t) => {
+    const db = dbWithToday();
+    const wwCatId = "615c92b5-267b-476a-88bf-d7c659f8eddc";
+    const quizCatId = "5286d18a-f6c5-4258-b9f0-81ab8b369261";
+    const wwItems = [
+        { id: "d7c23ebc-427f-400e-af80-905a3f912eac", label: "#1", max_score: 100 },
+        { id: "2be3b000-b91b-4406-86ee-2e9f691e64d5", label: "#2", max_score: 100 },
+        { id: "f27aa420-43c4-4f7f-9761-adf07315d474", label: "#3", max_score: 100 },
+        { id: "d756e585-5016-4ef1-adc1-fc1e9bd4a39f", label: "#4", max_score: 100 },
+        { id: "7158317d-9857-4ec3-927b-56b4683f03aa", label: "#5", max_score: 100 },
+        { id: "cab3a46b-60de-4340-a829-74d51e3b0c83", label: "#6", max_score: 100 }
+    ];
+    db.grading_categories = [
+        { id: wwCatId, user_id: "user-1", section: "Grade 11 - STEM", name: "WRITTEN WORK", weight: 50, items: wwItems, archived: false },
+        { id: quizCatId, user_id: "user-1", section: "Grade 11 - STEM", name: "QUIZ", weight: 50, items: [{ id: "q-1", label: "#1", max_score: 100 }], archived: false }
+    ];
+    db.section_grading_categories = [
+        { id: 1, user_id: "user-1", section: "Grade 11 - STEM", category_id: wwCatId },
+        { id: 2, user_id: "user-1", section: "Grade 11 - STEM", category_id: quizCatId }
+    ];
+    db.scores = [
+        {
+            id: 1,
+            user_id: "user-1",
+            date: "2026-10-25",
+            student_id: "2026-0001",
+            subject: "General",
+            grading_period: "General",
+            category_id: wwCatId,
+            category_name: "WRITTEN WORK",
+            category_weight: 50,
+            item_id: wwItems[5].id,
+            item_label: "#6",
+            score: 100,
+            max_score: 100
+        }
+    ];
+
+    const pendingOps = wwItems.slice(0, 5).map((item, i) => ({
+        t: "scr",
+        date: "2026-10-25",
+        section: "Grade 11 - STEM",
+        student_id: "2026-0001",
+        grading_period: "General",
+        category_id: wwCatId,
+        category_name: "WRITTEN WORK",
+        category_weight: 50,
+        item_id: item.id,
+        item_label: item.label,
+        score: 80 + i,
+        max_score: 100
+    }));
+
+    const client = createFakeSupabase({ db, enforceGradingConstraints: true });
+    const page = loadPage({
+        html: "main.html",
+        scripts: ["pdf.js", "main.js"],
+        url: "https://scholog.test/main.html#scores",
+        beforeParse(window) {
+            installSupabaseStub(window, client);
+            installLucideStub(window);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+            window.localStorage.setItem("scholog_app_data_user-1_pending", JSON.stringify(pendingOps));
+        }
+    });
+    t.after(() => page.dom.window.close());
+
+    await waitFor(() => {
+        const remaining = JSON.parse(page.window.localStorage.getItem("scholog_app_data_user-1_pending") || "[]");
+        return remaining.length === 0;
+    }, { label: "queued subsection scores replayed cleanly" });
+
+    assert.equal(db.scores.filter(s => s.category_id === wwCatId && s.date === "2026-10-25").length, 6, "all 6 subsection scores stored on same date");
+
+    // Swapping category names in Categories & Weights must also succeed without a 23505/409 unique clash
+    page.window.openGradingSetup();
+    const rows = [...page.window.document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    const wwRow = rows.find(r => r.dataset.categoryId === wwCatId);
+    const quizRow = rows.find(r => r.dataset.categoryId === quizCatId);
+    wwRow.querySelector(".grading-category-name").value = "QUIZ";
+    quizRow.querySelector(".grading-category-name").value = "WRITTEN WORK";
+    page.window.document.getElementById("form-grading-setup").dispatchEvent(new page.window.Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => db.grading_categories.find(c => c.id === wwCatId)?.name === "QUIZ", { label: "swapped category names saved" });
+    assert.equal(db.grading_categories.find(c => c.id === quizCatId)?.name, "WRITTEN WORK");
+    assert.equal(db.grading_categories.filter(c => !c.archived).length, 2, "neither swapped category was deleted");
+});
+
 

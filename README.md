@@ -77,10 +77,11 @@ section's weights. Until every weighted subsection in the section has a score, t
 table shows a **running grade** rather than a complete final grade.
 
 Apply `supabase/migrations/20261025_grading_categories.sql`,
-`supabase/migrations/20261025_per_section_grading_categories.sql`, and
-`supabase/migrations/20261025_grading_category_items.sql` so scores carry
-grading-period, category, and subsection metadata and `grading_categories` store
-per-section categories and their subsections.
+`supabase/migrations/20261025_per_section_grading_categories.sql`,
+`supabase/migrations/20261025_grading_category_items.sql`, and
+`supabase/migrations/20261025_drop_legacy_score_category_unique_index.sql` so
+scores carry grading-period, category, and subsection metadata and
+`grading_categories` store per-section categories and their subsections.
 
 ## Backend
 

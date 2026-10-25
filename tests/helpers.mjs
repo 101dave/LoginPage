@@ -123,6 +123,22 @@ class QueryBuilder {
 
         if (this.op === "insert") {
             const input = Array.isArray(this.payload) ? this.payload : [this.payload];
+            if (client.enforceGradingConstraints && this.table === "section_grading_categories") {
+                for (const row of input) {
+                    const clash = table.find(
+                        (c) => c.user_id === row.user_id && c.section === row.section && c.category_id === row.category_id
+                    );
+                    if (clash) {
+                        return {
+                            data: null,
+                            error: {
+                                code: "23505",
+                                message: 'duplicate key value violates unique constraint "section_grading_categories_user_id_section_category_id_key"'
+                            }
+                        };
+                    }
+                }
+            }
             const created = input.map((row) => {
                 const fresh = { id: table.length + Math.floor(Math.random() * 100000) + 1, ...row };
                 if (this.table === "checkin_sessions") {
@@ -222,6 +238,23 @@ class QueryBuilder {
 
         if (this.op === "update") {
             const rows = table.filter((row) => matches(row, this.filters));
+            if (client.enforceGradingConstraints && this.table === "scores") {
+                const simulated = table.map((r) => (rows.includes(r) ? { ...r, ...this.payload } : r));
+                const seen = new Set();
+                for (const r of simulated) {
+                    const key = `${r.user_id}|${r.date}|${r.student_id}|${r.grading_period}|${r.category_id}|${r.item_id || ""}`;
+                    if (seen.has(key)) {
+                        return {
+                            data: null,
+                            error: {
+                                code: "23505",
+                                message: 'duplicate key value violates unique constraint "scores_user_date_student_period_cat_item_idx"'
+                            }
+                        };
+                    }
+                    seen.add(key);
+                }
+            }
             rows.forEach((row) => Object.assign(row, this.payload));
             return { data: rows.map((r) => ({ ...r })), error: null };
         }
