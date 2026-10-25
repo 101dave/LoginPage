@@ -85,6 +85,23 @@ see [Student record access](#student-record-access-record-codes)) plus
 scores carry grading-period, category, and subsection metadata and
 `grading_categories` store per-section categories and their subsections.
 
+Grading *periods* (terms for DepEd, semesters for college) need
+`supabase/migrations/20261025_section_grading_schemes.sql`; see
+[Grading schemes](#grading-schemes-high-school-and-college). Sections without a
+row in that table keep the legacy Quarter/Semester list, so this one is optional
+until a teacher actually picks a preset.
+
+Two migrations harden data that earlier builds wrote:
+
+| Migration | Closes |
+| --- | --- |
+| `20261025_attendance_status_and_student_id_constraints.sql` | `attendance.status` had no domain, so `''` or `'HACKED'` could be stored and counted as "recorded" — dragging the attendance rate down silently. Adds the `CHECK` (`NOT VALID`, validated automatically when no bad rows exist) and the `students (user_id, student_id)` unique index. |
+| `20261025_hot_path_indexes.sql` | Indexes for the query shapes the app issues, including `students (user_id, lower(student_id))` — without it every check-in scans the teacher's whole roster. |
+
+Deploy order for these: **run the SQL first, then publish the client.** The
+constraints only reject rows the new client never sends; an old client cached in
+a service worker could still try.
+
 ## Backend
 
 - Supabase project settings live in `.env` and are mirrored in `script.js`, `main.js`

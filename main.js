@@ -341,7 +341,9 @@ function normalizeState(raw) {
         if (s.section && !sections.includes(s.section)) sections.push(s.section);
     });
 
-    const validStatuses = new Set(["Present", "Absent", "Late", "Excused"]);
+    // One allow-list for the whole app (see ATTENDANCE_STATUSES): a status the
+    // database would reject must never enter state either.
+    const validStatuses = ATTENDANCE_STATUSES;
     const attendance = {};
     const rawAtt = (raw.attendance && typeof raw.attendance === "object" && !Array.isArray(raw.attendance))
         ? raw.attendance
@@ -598,9 +600,20 @@ async function fetchCloudState() {
     }));
 
     const attendance = {};
+    const rejectedStatuses = new Set();
     attData.forEach(row => {
+        // Rows written before the CHECK constraint may hold anything. They are
+        // not attendance records: loading them would count a learner as
+        // "recorded" while being neither present nor absent.
+        if (!isValidAttendanceStatus(row.status)) {
+            rejectedStatuses.add(String(row.status));
+            return;
+        }
         attendance[`${row.date}_${row.student_id}`] = row.status;
     });
+    if (rejectedStatuses.size > 0) {
+        console.warn("Ignored attendance rows with an unknown status:", [...rejectedStatuses]);
+    }
 
     const legacySectionMap = sectionCategoryData.reduce((map, row) => {
         if (!row?.section || !row?.category_id) return map;
@@ -777,13 +790,13 @@ function applyPendingOpsToLocalState(ops) {
         if (!op || typeof op !== "object") continue;
         switch (op.t) {
             case "att":
-                if (isValidDateStr(op.date) && op.student_id && op.status) {
+                if (isValidDateStr(op.date) && op.student_id && isValidAttendanceStatus(op.status)) {
                     state.attendance[`${op.date}_${op.student_id}`] = op.status;
                 }
                 break;
             case "attB":
                 (op.rows || []).forEach(r => {
-                    if (r && isValidDateStr(r.date) && r.student_id && r.status) {
+                    if (r && isValidDateStr(r.date) && r.student_id && isValidAttendanceStatus(r.status)) {
                         state.attendance[`${r.date}_${r.student_id}`] = r.status;
                     }
                 });
@@ -1883,6 +1896,23 @@ async function handleLogout() {
     // Remember the cache key before the user is cleared: it is derived from
     // the account id.
     const previousKey = cacheKey();
+
+    // Try to upload anything still queued while the session is still valid —
+    // that is the only way the device can be left clean. A failure here is not
+    // fatal: the cache stays, and the next sign-in flushes it.
+    let pendingAfterFlush = [];
+    try {
+        await flushPendingOps();
+        pendingAfterFlush = JSON.parse(localStorage.getItem(`${previousKey}_pending`) || "[]");
+    } catch (err) {
+        console.error("Could not flush the offline queue before sign-out:", err);
+        try {
+            pendingAfterFlush = JSON.parse(localStorage.getItem(`${previousKey}_pending`) || "[]");
+        } catch (e) {
+            pendingAfterFlush = [];
+        }
+    }
+
     try {
         if (supabaseClient) {
             await supabaseClient.auth.signOut();
@@ -1896,15 +1926,24 @@ async function handleLogout() {
     // localStorage. Keep a cache only if dropping it would lose unsynced work.
     // The unsuffixed key is included because it is what local-only sessions used
     // to write, and it would otherwise linger on the device forever.
+    const heldBack = Array.isArray(pendingAfterFlush) && pendingAfterFlush.length > 0;
     for (const key of new Set([previousKey, "scholog_app_data"])) {
         try {
             const pending = JSON.parse(localStorage.getItem(`${key}_pending`) || "[]");
             if (!Array.isArray(pending) || pending.length === 0) {
                 localStorage.removeItem(key);
+                // An empty queue is not worth remembering either.
+                localStorage.removeItem(`${key}_pending`);
             }
         } catch (e) {
             console.error("Could not inspect the offline queue before sign-out:", e);
         }
+    }
+    if (heldBack) {
+        console.warn(
+            `${pendingAfterFlush.length} change(s) could not be uploaded before sign-out; ` +
+            "the cached data stays on this device until they sync."
+        );
     }
     localStorage.removeItem("scholog_local_user");
     // Don't leave a resumable QR check-in session behind on a shared device.
@@ -4029,8 +4068,40 @@ function openQrCheckInPage() {
 // Pull the newest data from Supabase without clobbering queued offline changes
 // or an attendance edit the teacher made while the request was in flight.
 // Returns "synced", "skipped" (local work present) or "offline".
+/**
+ * A session can die without Supabase firing SIGNED_OUT: signed out on another
+ * device, refresh token revoked, JWT rejected by the API. The dashboard must not
+ * keep rendering cached grades and queueing writes forever, so the background
+ * refresh asks "do I still have a session?" before it fetches anything.
+ *
+ * Returns false when the app has been sent back to the login page.
+ */
+async function verifySessionStillValid() {
+    if (!supabaseClient || !currentUser) return true;
+    // The offline-only account has no Supabase session by design.
+    if (currentUser.id === "local-user") return true;
+
+    let session = null;
+    try {
+        const { data } = await supabaseClient.auth.getSession();
+        session = data?.session || null;
+    } catch (err) {
+        // A network hiccup is not proof of a dead session — keep the teacher
+        // working and let the next refresh decide.
+        return true;
+    }
+    if (session) return true;
+
+    currentUser = null;
+    if (/main\.html/i.test(window.location.pathname)) {
+        window.location.href = "index.html";
+    }
+    return false;
+}
+
 async function syncLatestFromCloud() {
     if (!cloudReady()) return "offline";
+    if (!(await verifySessionStillValid())) return "signed-out";
 
     let queued = [];
     try { queued = JSON.parse(localStorage.getItem(pendingKey()) || "[]"); } catch (err) { queued = []; }

@@ -454,19 +454,58 @@ test("sign-out clears the cached class data so the next teacher on the device ca
     );
 });
 
-test("sign-out keeps the cache when there is unsynced work, so nothing is lost", async (t) => {
-    const { window, dom, client } = await bootReady();
+test("sign-out uploads queued work first, then clears the cache", async (t) => {
+    const { window, dom, client, db } = await bootReady();
     t.after(() => dom.window.close());
 
     const key = "scholog_app_data_user-1";
     window.localStorage.setItem(key, JSON.stringify({ students: [{ name: "Juan" }] }));
-    window.localStorage.setItem(`${key}_pending`, JSON.stringify([{ t: "att", date: todayStr(), student_id: "2026-0001", status: "Absent" }]));
+    window.localStorage.setItem(`${key}_pending`, JSON.stringify([
+        { t: "att", date: todayStr(), student_id: "2026-0001", status: "Absent", _qid: "q-1" }
+    ]));
+
     window.handleLogout();
     await waitFor(() => client.signedOut, { label: "sign out" });
     await sleep(150);
 
+    assert.equal(window.localStorage.getItem(key), null, "the cache is gone once the queue is empty");
+    assert.equal(window.localStorage.getItem(`${key}_pending`), null, "the queue drained");
+    const row = db.attendance.find(
+        (entry) => entry.student_id === "2026-0001" && entry.date === todayStr()
+    );
+    assert.equal(row?.status, "Absent", "the queued mark reached the cloud instead of being dropped");
+});
+
+test("sign-out keeps the cache only when a queued change cannot be uploaded", async (t) => {
+    const db = defaultDb();
+    const client = createFakeSupabase({ db, enforceGradingConstraints: true, failTable: "attendance" });
+    const page = loadPage({
+        html: "main.html",
+        scripts: ["vendor/lucide-subset.js", "csv.js", "pdf.js", "main.js"],
+        url: "https://scholog.test/main.html",
+        beforeParse(window) {
+            installSupabaseStub(window, client);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+            window.__toasts = [];
+        }
+    });
+    t.after(() => page.dom.window.close());
+    const window = page.window;
+    await waitFor(() => window.document.getElementById("stat-total").textContent !== "0", { label: "dashboard" });
+
+    const key = "scholog_app_data_user-1";
+    window.localStorage.setItem(key, JSON.stringify({ students: [{ name: "Juan" }] }));
+    window.localStorage.setItem(`${key}_pending`, JSON.stringify([
+        { t: "att", date: todayStr(), student_id: "2026-0002", status: "Absent", _qid: "q-2" }
+    ]));
+
+    window.handleLogout();
+    await waitFor(() => client.signedOut, { label: "sign out" });
+    await sleep(200);
+
     assert.ok(window.localStorage.getItem(key), "the cache survives (it holds the only copy of the pending work)");
-    assert.ok(window.localStorage.getItem(`${key}_pending`), "the queue survives");
+    assert.ok(window.localStorage.getItem(`${key}_pending`), "the queue survives too");
 });
 
 test("an expired session sends the dashboard back to the login page", async (t) => {
@@ -506,4 +545,130 @@ test("renaming a student ID carries their attendance and scores over (no orphane
     assert.equal(db.scores.filter((row) => row.student_id === "2026-0001").length, 0, "no scores left behind on the old code");
     assert.equal(db.attendance.filter((row) => row.student_id === "2026-4242").length, oldAtt, "attendance followed the student");
     assert.equal(db.scores.filter((row) => row.student_id === "2026-4242").length, oldScores, "scores followed the student");
+});
+
+test("a poisoned offline queue cannot replay an invalid status into the app", async (t) => {
+    const { window, dom, db } = await bootReady();
+    t.after(() => dom.window.close());
+
+    // Simulates a queue written by an older build, or edited by hand in
+    // DevTools. It must be ignored, not replayed.
+    window.localStorage.setItem("scholog_app_data_pending", JSON.stringify([
+        { t: "att", date: todayStr(), student_id: "2026-0002", status: "HACKED", _qid: "bad-1" },
+        { t: "att", date: todayStr(), student_id: "2026-0003", status: "", _qid: "bad-2" }
+    ]));
+
+    const before = db.attendance
+        .filter((row) => row.date === todayStr())
+        .map((row) => `${row.student_id}:${row.status}`)
+        .sort();
+
+    await window.syncLatestFromCloud();
+
+    const after = db.attendance
+        .filter((row) => row.date === todayStr())
+        .map((row) => `${row.student_id}:${row.status}`)
+        .sort();
+
+    assert.deepEqual(after, before, "no invalid status reached the database");
+});
+
+test("attendance rows already poisoning the cloud are ignored, not counted", async (t) => {
+    const db = defaultDb();
+    // A row written before the CHECK constraint existed.
+    db.attendance.push({
+        id: 99, user_id: "user-1", date: todayStr(),
+        student_id: "2026-0001", status: "HACKED", subject: "General"
+    });
+    const client = createFakeSupabase({ db, enforceGradingConstraints: true });
+    const page = loadPage({
+        html: "main.html",
+        scripts: ["vendor/lucide-subset.js", "csv.js", "pdf.js", "main.js"],
+        url: "https://scholog.test/main.html",
+        beforeParse(window) {
+            installSupabaseStub(window, client);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+        }
+    });
+    t.after(() => page.dom.window.close());
+    await waitFor(() => page.window.document.getElementById("stat-total").textContent !== "0", { label: "dashboard" });
+
+    // The fixture is Present + Late + Absent = 2 in, 1 out. The poisoned row
+    // shares its key with 2026-0001's valid Present row, so if it were loaded
+    // it would overwrite it and Present would silently drop to 1.
+    page.window.switchTab("dashboard");
+    const document = page.window.document;
+    assert.equal(document.getElementById("stat-present").textContent, "2", "Present still counts the valid row");
+    assert.equal(document.getElementById("stat-absent").textContent, "1");
+    assert.equal(document.getElementById("stat-rate").textContent, "50%", "2 of 4 learners in");
+    assert.equal(document.getElementById("stat-total").textContent, "4");
+});
+
+test("the database rejects an invalid attendance status (CHECK constraint ships in the migration)", async () => {
+    const sql = await import("node:fs").then((fs) =>
+        fs.readFileSync(new URL("../supabase/migrations/20261025_attendance_status_and_student_id_constraints.sql", import.meta.url), "utf8")
+    );
+    assert.match(sql, /add constraint attendance_status_check/);
+    assert.match(sql, /check \(status in \('Present', 'Absent', 'Late', 'Excused'\)\)/);
+    assert.match(sql, /not valid/, "existing rows are reported, not silently rewritten");
+    assert.match(sql, /students_user_student_id_key/);
+});
+
+test("a session revoked elsewhere stops the background refresh instead of queueing forever", async (t) => {
+    const { window, dom, client } = await bootReady();
+    t.after(() => dom.window.close());
+
+    // Signing out on another device (or revoking the refresh token) leaves a
+    // session record in the client that is no longer usable.
+    const readsBefore = client.calls.length;
+    client.session = null;
+
+    const result = await window.syncLatestFromCloud();
+    assert.equal(result, "signed-out", "the refresh reports a dead session");
+    assert.equal(client.calls.length, readsBefore, "and stops reading the cloud");
+});
+
+test("a session that is still valid keeps the refresh working", async (t) => {
+    const { window, dom, client } = await bootReady();
+    t.after(() => dom.window.close());
+
+    const result = await window.syncLatestFromCloud();
+    assert.equal(result, "synced");
+    assert.ok(client.calls.length > 0, "the cloud was read");
+});
+
+test("the offline-only account is never logged out by the session check", async (t) => {
+    const db = defaultDb();
+    const client = createFakeSupabase({ db, enforceGradingConstraints: true, session: null });
+    const page = loadPage({
+        html: "main.html",
+        scripts: ["vendor/lucide-subset.js", "csv.js", "pdf.js", "main.js"],
+        url: "https://scholog.test/main.html",
+        beforeParse(window) {
+            installSupabaseStub(window, client);
+            window.qrcode = makeFakeQr();
+            window.jspdf = { jsPDF: makeFakeJsPdf().FakeJsPDF };
+            window.localStorage.setItem(
+                "scholog_local_user",
+                JSON.stringify({ email: "offline@example.com", name: "Offline Teacher" })
+            );
+            window.localStorage.setItem("scholog_app_data", JSON.stringify({
+                sections: ["Grade 11 - STEM"],
+                students: [{ id: "1", student_id: "2026-0001", name: "Juan Dela Cruz", section: "Grade 11 - STEM" }],
+                attendance: {},
+                scores: {},
+                gradeCategories: [],
+                sectionGradeCategories: {}
+            }));
+        }
+    });
+    t.after(() => page.dom.window.close());
+    await waitFor(() => page.window.document.getElementById("stat-total").textContent !== "0", { label: "local data" });
+
+    // No cloud session exists, so "synced/offline" is the only sane answer —
+    // never "signed-out", which would throw the teacher out of local mode.
+    const result = await page.window.syncLatestFromCloud();
+    assert.notEqual(result, "signed-out");
+    assert.equal(page.window.localStorage.getItem("scholog_local_user") !== null, true);
 });

@@ -74,6 +74,27 @@ stayed on `main.html` looking at cached data, and every subsequent write joined
 the offline queue and retried forever against a dead session. Now a `SIGNED_OUT`
 while on the dashboard redirects to `index.html`.
 
+### Follow-up sweep: the same three defects had more entry points
+
+The first pass fixed the obvious path in each case. Re-checking every write path
+found three more doors into the same rooms — now closed and covered by tests:
+
+| Entry point | Before | Now |
+| --- | --- | --- |
+| Offline queue replay (`att`, `attB` ops) | trusted `op.status`; a queue written by an older build, or edited in DevTools, replayed `"HACKED"` into state and up to the cloud | validated against the same allow-list; the op is dropped |
+| Cloud load (`fetchCloudState`) | rows written *before* the `CHECK` existed were loaded as-is; a `"HACKED"` row sharing a key with a valid `Present` row **silently overwrote it**, dropping a learner out of the present count | invalid rows are skipped and logged; the valid row survives |
+| `normalizeState` (local cache, backup restore, JSON import) | had its own copy of the status list | uses the shared `ATTENDANCE_STATUSES`, so the two lists cannot drift |
+
+| Entry point | Before | Now |
+| --- | --- | --- |
+| Sign-out with queued work | kept the cache on the device because the queue was unsynced, leaving the roster readable | **tries to upload the queue first**, then wipes the cache when it empties; only if the upload fails does the data stay (with a console warning) |
+| Empty queue after sign-out | left `<key>_pending` = `[]` behind | removed |
+
+| Entry point | Before | Now |
+| --- | --- | --- |
+| Session revoked from another device / refresh token killed | no `SIGNED_OUT` event ever fires, so the dashboard kept rendering cached grades and every write joined a queue that could never drain | `syncLatestFromCloud()` verifies the session (`getSession()`) before every refresh; a dead session redirects to `index.html` and the refresh returns `"signed-out"` |
+| Offline-only account (`scholog_local_user`) | would have been caught by that check | explicitly exempted — it has no Supabase session by design |
+
 ### 4. Hot-path indexes (added pre-emptively for item 5)
 
 `supabase/migrations/20261025_hot_path_indexes.sql`. The check-in RPCs match
@@ -84,6 +105,20 @@ indexes `attendance (user_id, date)`, `attendance (user_id, student_id)`,
 and `students (lower(record_code))`.
 
 ---
+
+### Proof, per defect
+
+| Test | What it proves |
+| --- | --- |
+| `invalid input: an unknown attendance status never reaches state` | the UI path refuses it |
+| `a poisoned offline queue cannot replay an invalid status into the app` | the queue path refuses it |
+| `attendance rows already poisoning the cloud are ignored, not counted` | a legacy bad row cannot erase a valid `Present` (dashboard still reads 2 present / 1 absent / 50%) |
+| `the database rejects an invalid attendance status (CHECK constraint ships in the migration)` | the `CHECK … NOT VALID` + the `students (user_id, student_id)` index are really in the SQL |
+| `sign-out uploads queued work first, then clears the cache` | the queue drains to the cloud, then the device is wiped |
+| `sign-out keeps the cache only when a queued change cannot be uploaded` | the data-loss fallback still works when the network is down |
+| `an expired session sends the dashboard back to the login page` | `SIGNED_OUT` handling |
+| `a session revoked elsewhere stops the background refresh instead of queueing forever` | revoked sessions stop the reads |
+| `the offline-only account is never logged out by the session check` | local mode is not collateral damage |
 
 ## Not testable in this environment
 
