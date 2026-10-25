@@ -698,16 +698,19 @@
                 $("student-id-input").value = "";
             } else if (data && data.error === "device_already_used") {
                 const owner = data.device_student_name ? `${data.device_student_name} (${data.device_student_id})` : "another student";
+                const userId = state.session && state.session.user_id ? state.session.user_id : "";
                 state.deviceLocked = true;
                 writeDeviceLock({
                     token: state.token,
                     studentId: data.device_student_id || "",
                     name: data.device_student_name || "Student",
+                    userId,
                     at: Date.now()
                 });
+                const recordUrl = data.device_student_id ? buildStudentRecordUrl(data.device_student_id, userId) : "";
                 showResult("error", "One check-in per phone",
                     `This phone already checked in ${owner}. Each phone can only mark one student — ask your teacher if this is a mistake.`,
-                    { locked: true });
+                    { locked: true, recordUrl });
             } else {
                 showResult("error", "Could not mark attendance",
                     friendlyError(data && data.error, state.session.section),
