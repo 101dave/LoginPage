@@ -17,9 +17,38 @@ let historyStudentId = null;
 let historyCurrentDate = new Date();
 let cloudHasData = false;
 let flushingOps = false;
+let mainDeferredPrompt = null;
 // Bumped whenever attendance is changed locally. Background cloud refreshes
 // compare it so a slow refresh can never overwrite a fresh mark/save.
 let localMutationSeq = 0;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    mainDeferredPrompt = e;
+    const isStandalone = Boolean(
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+        window.navigator.standalone === true
+    );
+    if (!isStandalone) {
+        document.getElementById("navInstallAppBtn")?.classList.remove("hidden");
+        document.getElementById("mobInstallAppBtn")?.classList.remove("hidden");
+    }
+});
+
+async function triggerMainPwaInstall() {
+    if (mainDeferredPrompt) {
+        mainDeferredPrompt.prompt();
+        const { outcome } = await mainDeferredPrompt.userChoice;
+        if (outcome === "accepted") {
+            showToast("Scholog app installed!", "success");
+            document.getElementById("navInstallAppBtn")?.classList.add("hidden");
+            document.getElementById("mobInstallAppBtn")?.classList.add("hidden");
+        }
+        mainDeferredPrompt = null;
+    } else {
+        showToast("Tap your browser menu and choose 'Install app' or 'Add to Home screen'.", "success");
+    }
+}
 
 let state = {
     sections: [],
@@ -720,6 +749,25 @@ function applyPendingOpsToLocalState(ops) {
             case "scrB":
                 (op.rows || []).forEach(r => applyScoreOpToLocalState(r));
                 break;
+            case "scr-": {
+                if (op.date && op.student_id) {
+                    const key = makeScoreRecordKey(op.date, op.student_id, op.grading_period || "General", op.category_id, op.category_name, op.item_id || "");
+                    delete state.scores[key];
+                    Object.keys(state.scores).forEach(k => {
+                        const v = state.scores[k];
+                        if (
+                            v &&
+                            (v.student_id || parseScoreKey(k).studentId) === op.student_id &&
+                            (v.grading_period || "General") === (op.grading_period || "General") &&
+                            v.category_id === op.category_id &&
+                            (v.item_id || "") === (op.item_id || "")
+                        ) {
+                            delete state.scores[k];
+                        }
+                    });
+                }
+                break;
+            }
             case "sec+":
                 if (op.name && !state.sections.includes(op.name)) state.sections.push(op.name);
                 break;
@@ -759,6 +807,44 @@ function applyPendingOpsToLocalState(ops) {
                     if (op.section && !state.sections.includes(op.section)) state.sections.push(op.section);
                 }
                 break;
+            case "stuB+":
+                (op.rows || []).forEach(r => {
+                    if (!r || !r.student_id || !r.name) return;
+                    const existing = state.students.find(s => s.student_id === r.student_id);
+                    if (existing) {
+                        existing.name = r.name;
+                        existing.email = r.email || "";
+                        existing.section = r.section || existing.section;
+                    } else {
+                        state.students.push({
+                            id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                            student_id: r.student_id,
+                            name: r.name,
+                            email: r.email || "",
+                            section: r.section || ""
+                        });
+                    }
+                    if (r.section && !state.sections.includes(r.section)) state.sections.push(r.section);
+                });
+                break;
+            case "stu^":
+                if (op.old_code && op.student_id) {
+                    const existing = state.students.find(s => s.student_id === op.old_code || s.student_id === op.student_id);
+                    if (existing) {
+                        existing.student_id = op.student_id;
+                        if (op.name) existing.name = op.name;
+                        if (op.email !== undefined) existing.email = op.email || "";
+                        if (op.section) existing.section = op.section;
+                    }
+                    relinkStudentRecordsLocally(op.old_code, op.student_id);
+                }
+                break;
+            case "stu-":
+                if (op.student_id) {
+                    state.students = state.students.filter(s => s.student_id !== op.student_id);
+                    removeStudentRecordsLocally(op.student_id);
+                }
+                break;
             default:
                 break;
         }
@@ -773,9 +859,9 @@ function queueOp(op) {
         // Keep only the latest attendance status per student+date
         if (op.t === "att") {
             out = q.filter(e => !(e.t === "att" && e.date === op.date && e.student_id === op.student_id));
-        } else if (op.t === "scr") {
+        } else if (op.t === "scr" || op.t === "scr-") {
             out = q.filter(e => !(
-                e.t === "scr"
+                (e.t === "scr" || e.t === "scr-")
                 && e.date === op.date
                 && e.student_id === op.student_id
                 && e.grading_period === op.grading_period
@@ -1208,6 +1294,17 @@ async function applyCloudOp(op) {
         case "scr": // one score with its category and grading-period metadata
             await upsertScorePayloadWithCategoryRecovery(scoreRowForCloud(op, uid), uid, op.section || "");
             break;
+        case "scr-": { // delete one cleared score cell
+            let q = supabaseClient.from("scores").delete()
+                .eq("user_id", uid)
+                .eq("date", op.date)
+                .eq("student_id", op.student_id)
+                .eq("grading_period", op.grading_period || "General")
+                .eq("category_id", op.category_id);
+            if (op.item_id) q = q.eq("item_id", op.item_id);
+            must(await q);
+            break;
+        }
         case "scrB": { // batch scores
             for (let i = 0; i < op.rows.length; i += 500) {
                 const slice = op.rows.slice(i, i + 500);
@@ -1229,6 +1326,16 @@ async function applyCloudOp(op) {
         case "att^": // re-link attendance after a student code rename
             if (op.old_code !== op.student_id) {
                 must(await supabaseClient.from("attendance").update({ student_id: op.student_id })
+                    .eq("user_id", uid).eq("student_id", op.old_code));
+            }
+            break;
+        case "scr-stu": // remove one student's score history
+            must(await supabaseClient.from("scores").delete()
+                .eq("user_id", uid).eq("student_id", op.student_id));
+            break;
+        case "scr^": // re-link scores after a student code rename
+            if (op.old_code !== op.student_id) {
+                must(await supabaseClient.from("scores").update({ student_id: op.student_id })
                     .eq("user_id", uid).eq("student_id", op.old_code));
             }
             break;
@@ -1281,17 +1388,34 @@ async function applyCloudOp(op) {
                 name: op.name, email: op.email || null, section: op.section
             }, { onConflict: "user_id,student_id" }));
             break;
+        case "stuB+": { // batch add/edit students
+            for (let i = 0; i < op.rows.length; i += 500) {
+                must(await supabaseClient.from("students").upsert(
+                    op.rows.slice(i, i + 500).map(r => ({
+                        user_id: uid,
+                        student_id: r.student_id,
+                        name: r.name,
+                        email: r.email || null,
+                        section: r.section
+                    })),
+                    { onConflict: "user_id,student_id" }
+                ));
+            }
+            break;
+        }
         case "stu^": // rename/edit student keyed by their OLD code
             must(await supabaseClient.from("students").update({
                 student_id: op.student_id, name: op.name,
                 email: op.email || null, section: op.section
             }).eq("user_id", uid).eq("student_id", op.old_code));
             await applyCloudOp({ t: "att^", old_code: op.old_code, student_id: op.student_id });
+            await applyCloudOp({ t: "scr^", old_code: op.old_code, student_id: op.student_id });
             break;
-        case "stu-": // delete student + their attendance history
+        case "stu-": // delete student + their attendance & score history
             must(await supabaseClient.from("students").delete()
                 .eq("user_id", uid).eq("student_id", op.student_id));
             await applyCloudOp({ t: "att-", student_id: op.student_id });
+            await applyCloudOp({ t: "scr-stu", student_id: op.student_id });
             break;
         case "prof": { // display name + compressed avatar on the account
             const meta = { full_name: op.full_name };
@@ -1579,6 +1703,16 @@ async function handleLogout() {
 }
 
 // --- Dashboard View ---
+function openSectionAttendance(sectionName) {
+    if (!sectionName) return;
+    populateSectionDropdowns();
+    const attSelect = document.getElementById("att-section");
+    if (attSelect && state.sections.includes(sectionName)) {
+        attSelect.value = sectionName;
+    }
+    switchTab("attendance");
+}
+
 function renderDashboard() {
     const today = todayStr();
     document.getElementById("dash-date-label").textContent = `Today (${today})`;
@@ -1607,35 +1741,111 @@ function renderDashboard() {
 
     if (state.sections.length === 0) {
         container.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">No sections created yet. Open <strong>Class List</strong> to add your first section and students.</div>`;
+    } else {
+        state.sections.forEach(sec => {
+            const secStudents = state.students.filter(s => s.section === sec);
+            let secPresent = 0;
+            let secAbsent = 0;
+            let secLate = 0;
+            let secExcused = 0;
+            let secRecorded = 0;
+            secStudents.forEach(s => {
+                const status = state.attendance[`${today}_${s.student_id}`];
+                if (status) secRecorded++;
+                // Kasama rin ang "Late" dito sa per-section breakdown
+                if (status === "Present" || status === "Late") secPresent++;
+                if (status === "Absent") secAbsent++;
+                if (status === "Late") secLate++;
+                if (status === "Excused") secExcused++;
+            });
+            const secRate = secStudents.length > 0 ? Math.round((secPresent / secStudents.length) * 100) : 0;
+            const detailPills = secRecorded === 0 && secStudents.length > 0
+                ? `<span class="dash-sec-pill dash-sec-unrecorded">Not recorded today</span>`
+                : [
+                    secLate > 0 ? `<span class="dash-sec-pill dash-sec-late">${secLate} Late</span>` : "",
+                    secAbsent > 0 ? `<span class="dash-sec-pill dash-sec-absent">${secAbsent} Absent</span>` : "",
+                    secExcused > 0 ? `<span class="dash-sec-pill dash-sec-excused">${secExcused} Excused</span>` : ""
+                ].filter(Boolean).join(" ");
+
+            const item = document.createElement("div");
+            item.className = "breakdown-item";
+            item.innerHTML = `
+                <div class="breakdown-info">
+                    <h3>${esc(sec)}</h3>
+                    <p>${secStudents.length} Students — ${secPresent} Present Today ${detailPills}</p>
+                </div>
+                <div class="breakdown-progress-group">
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-fill" style="width: ${secRate}%"></div>
+                    </div>
+                    <span class="stat-value" style="font-size: 16px;">${secRate}%</span>
+                    <button type="button" onclick="openSectionAttendance('${jsArg(sec)}')" class="btn btn-secondary dash-take-att-btn" title="Take attendance for ${esc(sec)}">Mark</button>
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    }
+
+    renderDashboardWatchlist();
+}
+
+function renderDashboardWatchlist() {
+    const watchContainer = document.getElementById("dashboard-watchlist-container");
+    const watchBadge = document.getElementById("dash-watchlist-badge");
+    if (!watchContainer) return;
+
+    const countsByCode = new Map();
+    Object.keys(state.attendance).forEach(k => {
+        const { studentId } = parseAttKey(k);
+        const status = state.attendance[k];
+        if (!studentId || !status) return;
+        if (!countsByCode.has(studentId)) {
+            countsByCode.set(studentId, { Absent: 0, Late: 0, Present: 0, Excused: 0 });
+        }
+        const entry = countsByCode.get(studentId);
+        if (entry[status] !== undefined) entry[status]++;
+    });
+
+    const flagged = state.students
+        .map(stud => {
+            const c = countsByCode.get(stud.student_id) || { Absent: 0, Late: 0, Present: 0, Excused: 0 };
+            return { stud, absent: c.Absent, late: c.Late, present: c.Present };
+        })
+        .filter(item => item.absent > 0 || item.late >= 2)
+        .sort((a, b) => (b.absent - a.absent) || (b.late - a.late) || a.stud.name.localeCompare(b.stud.name));
+
+    const atRiskCount = flagged.filter(item => item.absent >= 2).length;
+    if (watchBadge) {
+        if (atRiskCount > 0) {
+            watchBadge.textContent = `${atRiskCount} Flagged (2+ Absences)`;
+            watchBadge.className = "badge badge-rose";
+        } else if (flagged.length > 0) {
+            watchBadge.textContent = `${flagged.length} Monitored`;
+            watchBadge.className = "badge badge-amber";
+        } else {
+            watchBadge.textContent = "All Clear";
+            watchBadge.className = "badge badge-emerald";
+        }
+    }
+
+    if (flagged.length === 0) {
+        watchContainer.innerHTML = `<div style="padding: 18px 20px; text-align: center; color: var(--text-muted); font-size: 13px;">No students have recorded absences or repeated tardiness yet.</div>`;
         return;
     }
 
-    state.sections.forEach(sec => {
-        const secStudents = state.students.filter(s => s.section === sec);
-        let secPresent = 0;
-        secStudents.forEach(s => {
-            const status = state.attendance[`${today}_${s.student_id}`];
-            // Kasama rin ang "Late" dito sa per-section breakdown
-            if (status === "Present" || status === "Late") secPresent++;
-        });
-        const secRate = secStudents.length > 0 ? Math.round((secPresent / secStudents.length) * 100) : 0;
-
-        const item = document.createElement("div");
-        item.className = "breakdown-item";
-        item.innerHTML = `
+    watchContainer.innerHTML = flagged.slice(0, 8).map(({ stud, absent, late }) => `
+        <div class="breakdown-item watchlist-item">
             <div class="breakdown-info">
-                <h3>${esc(sec)}</h3>
-                <p>${secStudents.length} Students — ${secPresent} Present Today</p>
+                <h3>${esc(stud.name)} <span class="font-mono" style="font-size:12px; color:var(--text-muted); font-weight:500;">(${esc(stud.student_id)})</span></h3>
+                <p>${esc(stud.section)}</p>
             </div>
-            <div class="breakdown-progress-group">
-                <div class="progress-bar-wrapper">
-                    <div class="progress-fill" style="width: ${secRate}%"></div>
-                </div>
-                <span class="stat-value" style="font-size: 16px;">${secRate}%</span>
+            <div class="watchlist-badges">
+                ${absent > 0 ? `<span class="badge ${absent >= 2 ? "badge-rose" : "badge-amber"}">${absent} Absent</span>` : ""}
+                ${late > 0 ? `<span class="badge badge-amber">${late} Late</span>` : ""}
+                <button type="button" onclick="openAttendanceHistory('${jsArg(stud.id)}')" class="action-link action-history">History</button>
             </div>
-        `;
-        container.appendChild(item);
-    });
+        </div>
+    `).join("");
 }
 
 // --- Directory View ---
@@ -1672,11 +1882,13 @@ function renderDirectory() {
             <h3>${selectedDirectorySection === "ALL" ? "All Sections" : esc(selectedDirectorySection)}</h3>
             <p>Showing active students in selected view</p>
         </div>
-        ${selectedDirectorySection !== "ALL" ? `
-            <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${state.students.length > 0 ? `<button onclick="openSectionQrModal('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-qr"><i data-lucide="qr-code"></i> Print QR Cards</button>` : ""}
+            ${selectedDirectorySection !== "ALL" ? `
                 <button onclick="openEditSectionModal('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-edit"><i data-lucide="edit-3"></i> Edit Section</button>
                 <button onclick="confirmDeleteSection('${jsArg(selectedDirectorySection)}')" class="btn btn-secondary action-delete"><i data-lucide="trash-2"></i> Delete Section</button>
-            </div>` : ""}
+            ` : ""}
+        </div>
     `;
 
     const filtered = state.students.filter(s => {
@@ -1724,10 +1936,12 @@ function populateSectionDropdowns() {
     const attSelect = document.getElementById("att-section");
     const scoreSelect = document.getElementById("score-section");
     const studSelect = document.getElementById("stud-section");
+    const bulkStudSelect = document.getElementById("bulk-stud-section");
     const transferSelect = document.getElementById("transfer-new-section");
 
     const prevAtt = attSelect ? attSelect.value : "";
     const prevScore = scoreSelect ? scoreSelect.value : "";
+    const prevBulk = bulkStudSelect ? bulkStudSelect.value : "";
     const optionsHTML = state.sections.length > 0
         ? state.sections.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")
         : `<option value="">-- No sections yet --</option>`;
@@ -1741,6 +1955,10 @@ function populateSectionDropdowns() {
         if (prevScore && state.sections.includes(prevScore)) scoreSelect.value = prevScore;
     }
     if (studSelect) studSelect.innerHTML = optionsHTML;
+    if (bulkStudSelect) {
+        bulkStudSelect.innerHTML = optionsHTML;
+        if (prevBulk && state.sections.includes(prevBulk)) bulkStudSelect.value = prevBulk;
+    }
     if (transferSelect) transferSelect.innerHTML = optionsHTML;
 }
 
@@ -1748,15 +1966,18 @@ function loadAttendanceSheet() {
     const selectedDate = document.getElementById("att-date").value;
     const selectedSec = document.getElementById("att-section").value;
     const tableBody = document.getElementById("att-table-body");
+    const subtitle = document.getElementById("att-sheet-subtitle");
 
     tableBody.innerHTML = "";
 
     if (!selectedSec) {
+        if (subtitle) subtitle.textContent = "Mark student statuses for the selected date and section";
         tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
         return;
     }
 
     if (!selectedDate) {
+        if (subtitle) subtitle.textContent = "Mark student statuses for the selected date and section";
         tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">Please select a valid date above.</td></tr>`;
         return;
     }
@@ -1764,13 +1985,30 @@ function loadAttendanceSheet() {
     const secStudents = state.students.filter(s => s.section === selectedSec);
 
     if (secStudents.length === 0) {
+        if (subtitle) subtitle.textContent = `${selectedDate} · ${selectedSec} · No students in section`;
         tableBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 24px; color: var(--text-muted);">No students in this section. Add students from Class List view.</td></tr>`;
         return;
     }
 
+    let recordedCount = 0;
+    secStudents.forEach(stud => {
+        if (state.attendance[`${selectedDate}_${stud.student_id}`]) recordedCount++;
+    });
+
+    if (subtitle) {
+        if (recordedCount === 0) {
+            subtitle.innerHTML = `${esc(selectedDate)} · ${esc(selectedSec)} · <span class="att-save-badge att-save-unsaved">Not saved yet — defaults to Present until you click Save</span>`;
+        } else if (recordedCount < secStudents.length) {
+            subtitle.innerHTML = `${esc(selectedDate)} · ${esc(selectedSec)} · <span class="att-save-badge att-save-partial">${recordedCount}/${secStudents.length} recorded — click Save to mark remaining as Present</span>`;
+        } else {
+            subtitle.innerHTML = `${esc(selectedDate)} · ${esc(selectedSec)} · <span class="att-save-badge att-save-saved">Saved (${recordedCount}/${secStudents.length} recorded)</span>`;
+        }
+    }
+
     secStudents.forEach((stud, idx) => {
         const key = `${selectedDate}_${stud.student_id}`;
-        const currentStatus = state.attendance[key] || "Present";
+        const savedStatus = state.attendance[key];
+        const currentStatus = savedStatus || "Present";
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -2213,7 +2451,7 @@ function loadScoreSheet() {
                             aria-label="${esc(titleLabel)} score for ${esc(stud.name)}"
                             data-key="${esc(record.key)}" data-category-id="${esc(category.id)}"
                             data-item-id="${esc(item.id)}" data-max-score="${esc(currentMaximum)}"
-                            onkeydown="if (event.key === 'Enter') this.blur();"
+                            onkeydown="handleScoreInputKeydown(event, this)"
                             onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', '${jsArg(category.id)}', '${jsArg(item.id)}', this.value, this.dataset.maxScore)">
                     </td>`;
                 });
@@ -2222,6 +2460,29 @@ function loadScoreSheet() {
         `;
         tableBody.appendChild(tr);
     });
+}
+
+function handleScoreInputKeydown(event, inputEl) {
+    if (!event || !inputEl) return;
+    const key = event.key;
+    if (key !== "Enter" && key !== "ArrowDown" && key !== "ArrowUp") return;
+
+    event.preventDefault();
+    const row = inputEl.closest("tr");
+    const catId = inputEl.dataset.categoryId || "";
+    const itemId = inputEl.dataset.itemId || "";
+    const targetRow = (key === "ArrowUp") ? row?.previousElementSibling : row?.nextElementSibling;
+    if (targetRow) {
+        const nextInput = Array.from(targetRow.querySelectorAll(".score-input")).find(
+            el => (el.dataset.categoryId || "") === catId && (el.dataset.itemId || "") === itemId
+        );
+        if (nextInput) {
+            nextInput.focus();
+            if (typeof nextInput.select === "function") nextInput.select();
+            return;
+        }
+    }
+    inputEl.blur();
 }
 
 async function setStudentStatus(date, studentId, status) {
@@ -2442,7 +2703,33 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, itemI
     }
     const targetItem = items.find(i => i.id === itemId) || items[0];
     if (!isValidDateStr(date) || !studentId || !gradingPeriod || !targetItem) return false;
-    if (String(scoreValue ?? "").trim() === "") return false;
+    const labelSuffix = items.length > 1 ? ` (${targetItem.label})` : "";
+
+    if (String(scoreValue ?? "").trim() === "") {
+        const existing = findScoreRecord(date, studentId, gradingPeriod, category, targetItem);
+        if (!existing.value) return false;
+        const recordDate = existing.value.date || date;
+        delete state.scores[existing.key];
+        localMutationSeq++;
+        saveLocalStore();
+        updateFinalGradeCells();
+
+        if (cloudReady()) {
+            const synced = await trySync({
+                t: "scr-",
+                date: recordDate,
+                section: category.section,
+                student_id: studentId,
+                grading_period: gradingPeriod,
+                category_id: category.id,
+                category_name: category.name,
+                item_id: targetItem.id
+            });
+            if (!synced) return false;
+        }
+        showToast(`${category.name}${labelSuffix} score cleared`, "success");
+        return true;
+    }
 
     const score = Number(scoreValue);
     const maxScore = Number(maxScoreValue);
@@ -2497,7 +2784,6 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, itemI
         if (!synced) return false;
     }
 
-    const labelSuffix = items.length > 1 ? ` (${targetItem.label})` : "";
     showToast(`${category.name}${labelSuffix} score saved: ${score}/${maxScore}`, "success");
     return true;
 }
@@ -2822,6 +3108,160 @@ function exportAttendanceToPDF() {
     }
 }
 
+function csvEscapeCell(val) {
+    const str = String(val ?? "");
+    if (/[",\r\n]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+}
+
+function triggerCsvSave(filename, rows) {
+    const csvBody = "\uFEFF" + rows.map(row => row.map(csvEscapeCell).join(",")).join("\r\n");
+    const blob = new Blob([csvBody], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function saveAttendanceCsv() {
+    const date = document.getElementById("att-date")?.value || todayStr();
+    const sec = document.getElementById("att-section")?.value || "";
+    if (!sec) {
+        showToast("Please select a section first.", "error");
+        return;
+    }
+    const secStudents = state.students.filter(s => s.section === sec);
+    if (secStudents.length === 0) {
+        showToast("There are no students in this section to save.", "error");
+        return;
+    }
+
+    const countsByCode = new Map();
+    Object.keys(state.attendance).forEach(k => {
+        const { studentId } = parseAttKey(k);
+        const st = state.attendance[k];
+        if (!studentId || !st) return;
+        if (!countsByCode.has(studentId)) {
+            countsByCode.set(studentId, { Present: 0, Late: 0, Absent: 0, Excused: 0 });
+        }
+        const entry = countsByCode.get(studentId);
+        if (entry[st] !== undefined) entry[st]++;
+    });
+
+    const header = [
+        "Student ID",
+        "Student Name",
+        "Section",
+        `${date} Status`,
+        "Total Present",
+        "Total Late",
+        "Total Absent",
+        "Total Excused",
+        "Attendance Rate (%)"
+    ];
+    const rows = [header];
+
+    secStudents.forEach(stud => {
+        const dayStatus = state.attendance[`${date}_${stud.student_id}`] || "Unrecorded (Default Present)";
+        const c = countsByCode.get(stud.student_id) || { Present: 0, Late: 0, Absent: 0, Excused: 0 };
+        const totalDays = c.Present + c.Late + c.Absent + c.Excused;
+        const rate = totalDays > 0 ? Math.round(((c.Present + c.Late) / totalDays) * 100) : 100;
+        rows.push([
+            stud.student_id,
+            stud.name,
+            stud.section,
+            dayStatus,
+            c.Present,
+            c.Late,
+            c.Absent,
+            c.Excused,
+            `${rate}%`
+        ]);
+    });
+
+    const safeSec = sec.replace(/[^a-z0-9_-]+/gi, "_");
+    triggerCsvSave(`Attendance_${safeSec}_${date}.csv`, rows);
+    showToast(`Attendance CSV saved (${secStudents.length} students).`, "success");
+}
+
+function saveScoreSheetCsv() {
+    const date = document.getElementById("score-date")?.value || todayStr();
+    const sec = document.getElementById("score-section")?.value || "";
+    const period = document.getElementById("score-period")?.value || "General";
+    if (!sec) {
+        showToast("Please select a section first.", "error");
+        return;
+    }
+    const secStudents = state.students.filter(s => s.section === sec);
+    if (secStudents.length === 0) {
+        showToast("There are no students in this section to save.", "error");
+        return;
+    }
+    const categories = getSectionGradeCategories(sec);
+    if (categories.length === 0) {
+        showToast("Configure grading categories for this section first.", "error");
+        return;
+    }
+
+    const periodLabel = period === "General" ? "Unassigned" : period;
+    const colDescriptors = [];
+    categories.forEach(cat => {
+        const items = getCategoryItems(cat);
+        items.forEach(item => {
+            const firstSaved = secStudents
+                .map(stud => findScoreRecord(date, stud.student_id, period, cat, item).value)
+                .find(Boolean);
+            const configuredMax = Number(item.period_max?.[period]) || Number(item.max_score) || 100;
+            const maxVal = Number(firstSaved?.max_score) > 0 ? Number(firstSaved.max_score) : configuredMax;
+            const colTitle = items.length > 1
+                ? `${cat.name} - ${item.label} (Max ${maxVal})`
+                : `${cat.name} (Max ${maxVal})`;
+            colDescriptors.push({ cat, item, maxVal, colTitle });
+        });
+    });
+
+    const header = [
+        "Student ID",
+        "Student Name",
+        "Section",
+        "Grading Period",
+        ...colDescriptors.map(d => d.colTitle),
+        "Computed Grade (%)",
+        "Status"
+    ];
+    const rows = [header];
+
+    secStudents.forEach(stud => {
+        const itemCells = colDescriptors.map(({ cat, item }) => {
+            const rec = findScoreRecord(date, stud.student_id, period, cat, item);
+            return rec.value ? rec.value.score : "";
+        });
+        const finalRes = calculateStudentFinalGrade(stud.student_id, sec, period);
+        const gradeCell = finalRes.grade != null ? finalRes.grade.toFixed(2) : "";
+        const statusCell = finalRes.grade == null
+            ? "No scores"
+            : (!finalRes.weightsValid ? "Check weights" : (finalRes.complete ? "Final" : `Running (${Number(finalRes.coveredWeight.toFixed(2))}%)`));
+        rows.push([
+            stud.student_id,
+            stud.name,
+            stud.section,
+            periodLabel,
+            ...itemCells,
+            gradeCell,
+            statusCell
+        ]);
+    });
+
+    const safeSec = sec.replace(/[^a-z0-9_-]+/gi, "_");
+    const safePeriod = periodLabel.replace(/[^a-z0-9_-]+/gi, "_");
+    triggerCsvSave(`Grades_${safeSec}_${safePeriod}_${date}.csv`, rows);
+    showToast(`Grades CSV saved (${secStudents.length} students).`, "success");
+}
+
 // --- Cloud refresh (picks up QR / Student-ID check-ins saved by students) ---
 let lastCloudSyncAt = 0;
 
@@ -2994,6 +3434,71 @@ async function handleSectionSubmit(e) {
     await trySync({ t: "sec+", name });
 }
 
+function relinkStudentRecordsLocally(oldCode, newCode) {
+    if (!oldCode || !newCode || oldCode === newCode) return;
+    const relinkedAtt = {};
+    Object.keys(state.attendance).forEach(k => {
+        const { date, studentId } = parseAttKey(k);
+        relinkedAtt[`${date}_${studentId === oldCode ? newCode : studentId}`] = state.attendance[k];
+    });
+    state.attendance = relinkedAtt;
+
+    const relinkedScores = {};
+    Object.keys(state.scores).forEach(k => {
+        const val = state.scores[k];
+        const parsed = parseScoreKey(k);
+        const sid = val?.student_id || parsed.studentId;
+        if (sid === oldCode) {
+            const period = val.grading_period || parseLegacyScoreSubject(val.subject || parsed.subject).period;
+            const nextKey = makeScoreRecordKey(
+                val.date || parsed.date,
+                newCode,
+                period,
+                val.category_id,
+                val.category_name,
+                val.item_id || ""
+            );
+            relinkedScores[nextKey] = {
+                ...val,
+                student_id: newCode
+            };
+        } else {
+            relinkedScores[k] = val;
+        }
+    });
+    state.scores = relinkedScores;
+}
+
+function removeStudentRecordsLocally(code) {
+    if (!code) return;
+    Object.keys(state.attendance).forEach(k => {
+        if (parseAttKey(k).studentId === code) delete state.attendance[k];
+    });
+    Object.keys(state.scores).forEach(k => {
+        const val = state.scores[k];
+        const sid = val?.student_id || parseScoreKey(k).studentId;
+        if (sid === code) delete state.scores[k];
+    });
+}
+
+function switchStudentModalMode(mode) {
+    const singleForm = document.getElementById("form-student");
+    const bulkForm = document.getElementById("form-student-bulk") || document.getElementById("form-bulk-student");
+    const singleTab = document.getElementById("tab-student-single");
+    const bulkTab = document.getElementById("tab-student-bulk");
+    const titleEl = document.getElementById("student-modal-title");
+
+    const isBulk = mode === "bulk";
+    if (singleForm) singleForm.classList.toggle("hidden", isBulk);
+    if (bulkForm) bulkForm.classList.toggle("hidden", !isBulk);
+    if (singleTab) singleTab.classList.toggle("active", !isBulk);
+    if (bulkTab) bulkTab.classList.toggle("active", isBulk);
+    if (titleEl && !document.getElementById("student-edit-id")?.value) {
+        titleEl.textContent = isBulk ? "Bulk Add Students" : "Add New Student";
+    }
+    if (isBulk) updateBulkStudentPreview();
+}
+
 function openAddStudentModal() {
     if (state.sections.length === 0) {
         showToast("Add a section first (e.g. Grade 11 - STEM), then add students to it.", "error");
@@ -3003,11 +3508,220 @@ function openAddStudentModal() {
     document.getElementById("student-modal-title").textContent = "Add New Student";
     document.getElementById("form-student").reset();
     document.getElementById("student-edit-id").value = "";
+    (document.getElementById("student-modal-tabs") || document.getElementById("student-modal-mode-tabs"))?.classList.remove("hidden");
+    switchStudentModalMode("single");
     populateSectionDropdowns();
     if (selectedDirectorySection !== "ALL" && state.sections.includes(selectedDirectorySection)) {
         document.getElementById("stud-section").value = selectedDirectorySection;
+        const bulkSec = document.getElementById("bulk-stud-section");
+        if (bulkSec) bulkSec.value = selectedDirectorySection;
     }
     openModal("modal-student");
+}
+
+function openBulkStudentModal() {
+    if (state.sections.length === 0) {
+        showToast("Add a section first (e.g. Grade 11 - STEM), then import students into it.", "error");
+        openAddSectionModal();
+        return;
+    }
+    document.getElementById("student-edit-id").value = "";
+    (document.getElementById("form-student-bulk") || document.getElementById("form-bulk-student"))?.reset();
+    (document.getElementById("student-modal-tabs") || document.getElementById("student-modal-mode-tabs"))?.classList.remove("hidden");
+    populateSectionDropdowns();
+    if (selectedDirectorySection !== "ALL" && state.sections.includes(selectedDirectorySection)) {
+        const bulkSec = document.getElementById("bulk-stud-section");
+        if (bulkSec) bulkSec.value = selectedDirectorySection;
+        document.getElementById("stud-section").value = selectedDirectorySection;
+    }
+    switchStudentModalMode("bulk");
+    updateBulkStudentPreview();
+    openModal("modal-student");
+}
+
+function parseCsvRowCells(line) {
+    if (line.includes("\t")) {
+        return line.split("\t").map(c => c.trim().replace(/^"|"$/g, ""));
+    }
+    const cells = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+                cur += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (ch === "," && !inQuotes) {
+            cells.push(cur.trim());
+            cur = "";
+        } else {
+            cur += ch;
+        }
+    }
+    cells.push(cur.trim());
+    return cells;
+}
+
+function parseBulkStudentLines(rawText) {
+    const lines = String(rawText || "")
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean);
+
+    const parsed = [];
+    const errors = [];
+    const seenCodes = new Set();
+
+    lines.forEach((line, idx) => {
+        const cells = parseCsvRowCells(line).filter(c => c !== "");
+        if (cells.length === 0) return;
+
+        // Skip header row if detected
+        if (idx === 0) {
+            const joinedLower = cells.join(" ").toLowerCase();
+            if (
+                (joinedLower.includes("name") && (joinedLower.includes("id") || joinedLower.includes("code") || joinedLower.includes("student"))) ||
+                joinedLower === "full name" ||
+                joinedLower === "student id"
+            ) {
+                return;
+            }
+        }
+
+        if (cells.length < 2) {
+            errors.push(`Row ${idx + 1}: Needs both Full Name and Student ID`);
+            return;
+        }
+
+        let name = "";
+        let student_id = "";
+        let email = "";
+
+        const emailIdx = cells.findIndex(c => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+        if (emailIdx !== -1 && cells.length >= 3) {
+            email = cells[emailIdx];
+        }
+
+        const remaining = cells.filter((_, i) => i !== emailIdx);
+        const firstLooksLikeId = /^[0-9A-Z_-]{3,24}$/i.test(remaining[0]) && /\d/.test(remaining[0]) && !remaining[0].includes(" ");
+        const secondLooksLikeId = /^[0-9A-Z_-]{3,24}$/i.test(remaining[1]) && /\d/.test(remaining[1]) && !remaining[1].includes(" ");
+
+        if (firstLooksLikeId && !secondLooksLikeId) {
+            student_id = remaining[0].trim();
+            name = remaining[1].trim();
+        } else {
+            name = remaining[0].trim();
+            student_id = remaining[1].trim();
+        }
+
+        if (!email && remaining[2] && remaining[2].includes("@")) {
+            email = remaining[2].trim();
+        }
+
+        if (!name || !student_id) {
+            errors.push(`Row ${idx + 1}: Missing name or ID`);
+            return;
+        }
+
+        const codeUpper = student_id.toLowerCase();
+        if (seenCodes.has(codeUpper)) {
+            errors.push(`Row ${idx + 1}: Duplicate ID "${student_id}" in list`);
+            return;
+        }
+        seenCodes.add(codeUpper);
+        parsed.push({ name, student_id, email });
+    });
+
+    return { parsed, errors };
+}
+
+function updateBulkStudentPreview() {
+    const textarea = document.getElementById("bulk-stud-text") || document.getElementById("bulk-stud-textarea");
+    const summaryEl = document.getElementById("bulk-preview-count") || document.getElementById("bulk-stud-preview");
+    if (!summaryEl) return;
+
+    const { parsed, errors } = parseBulkStudentLines(textarea?.value || "");
+    if (parsed.length === 0 && errors.length === 0) {
+        summaryEl.textContent = "0 students ready to import.";
+        summaryEl.className = "bulk-preview-summary";
+        return;
+    }
+
+    const existingUpdateCount = parsed.filter(r => state.students.some(s => s.student_id === r.student_id)).length;
+    const newCount = parsed.length - existingUpdateCount;
+    const parts = [`${parsed.length} student${parsed.length === 1 ? "" : "s"} ready (${newCount} new${existingUpdateCount > 0 ? `, ${existingUpdateCount} update` : ""})`];
+    if (errors.length > 0) {
+        parts.push(`${errors.length} skipped (${errors[0]})`);
+    }
+    summaryEl.textContent = parts.join(" · ");
+    summaryEl.className = `bulk-preview-summary ${errors.length > 0 ? "has-warning" : "has-ready"}`;
+}
+
+function handleBulkCsvFile(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+        const textarea = document.getElementById("bulk-stud-text") || document.getElementById("bulk-stud-textarea");
+        if (textarea) {
+            textarea.value = String(evt.target?.result || "");
+            updateBulkStudentPreview();
+        }
+    };
+    reader.readAsText(file);
+}
+
+async function handleBulkStudentSubmit(e) {
+    e.preventDefault();
+    const sec = document.getElementById("bulk-stud-section")?.value || "";
+    const textarea = document.getElementById("bulk-stud-text") || document.getElementById("bulk-stud-textarea");
+    const rawText = textarea?.value || "";
+
+    if (!sec) {
+        showToast("Please select a target section first.", "error");
+        return;
+    }
+
+    const { parsed, errors } = parseBulkStudentLines(rawText);
+    if (parsed.length === 0) {
+        showToast(errors[0] || "Paste at least one student row (Full Name, Student ID).", "error");
+        return;
+    }
+
+    const syncRows = [];
+    parsed.forEach(row => {
+        const existing = state.students.find(s => s.student_id === row.student_id);
+        if (existing) {
+            existing.name = row.name;
+            existing.section = sec;
+            if (row.email) existing.email = row.email;
+        } else {
+            state.students.push({
+                id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                name: row.name,
+                student_id: row.student_id,
+                section: sec,
+                email: row.email || ""
+            });
+        }
+        syncRows.push({
+            student_id: row.student_id,
+            name: row.name,
+            email: row.email || "",
+            section: sec
+        });
+    });
+
+    localMutationSeq++;
+    saveLocalStore();
+    closeModal("modal-student");
+    renderDirectory();
+    showToast(`Imported ${syncRows.length} student${syncRows.length === 1 ? "" : "s"} into ${sec}!`, "success");
+    await trySync({ t: "stuB+", rows: syncRows });
 }
 
 function openEditStudentModal(id) {
@@ -3017,6 +3731,8 @@ function openEditStudentModal(id) {
         return;
     }
     populateSectionDropdowns();
+    (document.getElementById("student-modal-tabs") || document.getElementById("student-modal-mode-tabs"))?.classList.add("hidden");
+    switchStudentModalMode("single");
     document.getElementById("student-modal-title").textContent = "Edit Student";
     document.getElementById("student-edit-id").value = stud.id;
     document.getElementById("stud-name").value = stud.name;
@@ -3062,12 +3778,7 @@ async function handleStudentSubmit(e) {
         state.students[idx] = { id: editId, name, student_id: studId, section: sec, email };
 
         if (oldCode !== studId) {
-            const relinked = {};
-            Object.keys(state.attendance).forEach(k => {
-                const { date, studentId } = parseAttKey(k);
-                relinked[`${date}_${studentId === oldCode ? studId : studentId}`] = state.attendance[k];
-            });
-            state.attendance = relinked;
+            relinkStudentRecordsLocally(oldCode, studId);
             saveLocalStore();
             closeModal("modal-student");
             renderDirectory();
@@ -3137,9 +3848,7 @@ function confirmDeleteStudent(id) {
         const code = stud.student_id;
 
         state.students = state.students.filter(s => s.id !== id);
-        Object.keys(state.attendance).forEach(k => {
-            if (parseAttKey(k).studentId === code) delete state.attendance[k];
-        });
+        removeStudentRecordsLocally(code);
 
         saveLocalStore();
         closeModal("modal-delete-student");
@@ -3190,6 +3899,19 @@ function studentQrPayload(studentId) {
     return `SCHOLOG:${String(studentId || "").trim()}`;
 }
 
+function buildQrSvgMarkup(payload, cellSize = 5) {
+    if (typeof window.qrcode !== "function") return "";
+    try {
+        const qr = window.qrcode(0, "M");
+        qr.addData(payload);
+        qr.make();
+        return qr.createSvgTag({ cellSize, margin: 4, scalable: true });
+    } catch (err) {
+        console.error("Could not build the student QR code:", err);
+        return "";
+    }
+}
+
 function openStudentQr(id) {
     const stud = state.students.find(s => s.id === id);
     if (!stud) {
@@ -3197,28 +3919,75 @@ function openStudentQr(id) {
         return;
     }
 
+    const modalBox = document.getElementById("modal-student-qr-content") || document.getElementById("modal-student-qr-box");
+    const singleWrap = document.getElementById("student-qr-single");
+    const bulkWrap = document.getElementById("student-qr-bulk");
+    const titleEl = document.getElementById("student-qr-modal-title") || document.getElementById("student-qr-title");
     const container = document.getElementById("student-qr-canvas");
     if (!container) return;
-    container.innerHTML = "";
 
+    modalBox?.classList.remove("modal-qr-bulk-mode");
+    singleWrap?.classList.remove("hidden");
+    if (bulkWrap) {
+        bulkWrap.classList.add("hidden");
+        bulkWrap.innerHTML = "";
+    }
+    if (titleEl) titleEl.textContent = "Student Check-In QR";
+
+    container.innerHTML = "";
     const payload = studentQrPayload(stud.student_id);
-    if (typeof window.qrcode !== "function") {
-        container.textContent = "QR generator unavailable — students can type their Student ID instead.";
+    const svg = buildQrSvgMarkup(payload, 5);
+    if (!svg) {
+        container.textContent = typeof window.qrcode !== "function"
+            ? "QR generator unavailable — students can type their Student ID instead."
+            : "Could not build the QR code — students can type their Student ID instead.";
     } else {
-        try {
-            const qr = window.qrcode(0, "M");
-            qr.addData(payload);
-            qr.make();
-            container.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4, scalable: true });
-            container.dataset.payload = payload;
-        } catch (err) {
-            console.error("Could not build the student QR code:", err);
-            container.textContent = "Could not build the QR code — students can type their Student ID instead.";
-        }
+        container.innerHTML = svg;
+        container.dataset.payload = payload;
     }
 
     document.getElementById("student-qr-name").textContent = stud.name;
     document.getElementById("student-qr-code").textContent = stud.student_id;
+    openModal("modal-student-qr");
+    refreshIcons();
+}
+
+function openSectionQrModal(sectionFilter = "ALL") {
+    const targetSec = sectionFilter || selectedDirectorySection || "ALL";
+    const list = state.students.filter(s => targetSec === "ALL" || s.section === targetSec);
+    if (list.length === 0) {
+        showToast("No students in this view to generate QR cards for.", "error");
+        return;
+    }
+
+    const modalBox = document.getElementById("modal-student-qr-content") || document.getElementById("modal-student-qr-box");
+    const singleWrap = document.getElementById("student-qr-single");
+    const bulkWrap = document.getElementById("student-qr-bulk");
+    const titleEl = document.getElementById("student-qr-modal-title") || document.getElementById("student-qr-title");
+    if (!bulkWrap) return;
+
+    modalBox?.classList.add("modal-qr-bulk-mode");
+    singleWrap?.classList.add("hidden");
+    bulkWrap.classList.remove("hidden");
+    if (titleEl) {
+        titleEl.textContent = targetSec === "ALL"
+            ? `All Student QR Cards (${list.length})`
+            : `${targetSec} — QR Cards (${list.length})`;
+    }
+
+    bulkWrap.innerHTML = list.map(stud => {
+        const payload = studentQrPayload(stud.student_id);
+        const svg = buildQrSvgMarkup(payload, 4);
+        return `
+            <div class="bulk-qr-card-item" data-student-id="${esc(stud.student_id)}">
+                <div class="bulk-qr-svg">${svg || `<span class="font-mono">${esc(payload)}</span>`}</div>
+                <strong class="bulk-qr-name">${esc(stud.name)}</strong>
+                <span class="bulk-qr-code font-mono">${esc(stud.student_id)}</span>
+                <small class="bulk-qr-sec">${esc(stud.section)}</small>
+            </div>
+        `;
+    }).join("");
+
     openModal("modal-student-qr");
     refreshIcons();
 }

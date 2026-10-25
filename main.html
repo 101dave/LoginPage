@@ -57,6 +57,10 @@
                     <i data-lucide="chevron-down" style="width: 14px; height: 14px; color: var(--text-muted);" class="mobile-hide"></i>
                 </div>
 
+                <button id="navInstallAppBtn" onclick="triggerMainPwaInstall()" class="btn btn-secondary hidden" title="Install Scholog App">
+                    <i data-lucide="smartphone"></i>
+                    <span class="mobile-hide">Install App</span>
+                </button>
                 <button onclick="handleLogout()" class="btn btn-logout-icon mobile-hide" title="Logout">
                     <i data-lucide="log-out"></i>
                     <span>Logout</span>
@@ -81,6 +85,9 @@
             </button>
             <button onclick="switchTab('scores'); toggleMobileMenu()" id="mob-nav-scores" class="mob-menu-item">
                 <i data-lucide="clipboard-check" style="width: 16px; height: 16px;"></i> Student Scores
+            </button>
+            <button id="mobInstallAppBtn" onclick="triggerMainPwaInstall(); toggleMobileMenu()" class="mob-menu-item hidden">
+                <i data-lucide="smartphone" style="width: 16px; height: 16px;"></i> Install App
             </button>
             <div class="mob-menu-divider"></div>
             <button onclick="handleLogout()" class="mob-menu-item text-rose">
@@ -137,6 +144,17 @@
                 </div>
                 <div id="section-breakdown-container" class="breakdown-list"></div>
             </div>
+
+            <div class="card" id="dashboard-watchlist-card">
+                <div class="card-header">
+                    <div>
+                        <h2>Attendance Watchlist</h2>
+                        <p>Students with frequent absences across recorded class days</p>
+                    </div>
+                    <span id="dash-watchlist-badge" class="badge badge-gray">0 flagged</span>
+                </div>
+                <div id="dashboard-watchlist-container" class="breakdown-list"></div>
+            </div>
         </section>
 
         <!-- ================= CLASS LIST VIEW ================= -->
@@ -154,6 +172,10 @@
                     <button onclick="openAddSectionModal()" class="btn btn-secondary">
                         <i data-lucide="folder-plus"></i>
                         <span>Add Section</span>
+                    </button>
+                    <button onclick="openBulkStudentModal()" class="btn btn-secondary">
+                        <i data-lucide="users"></i>
+                        <span>Bulk Add</span>
                     </button>
                     <button onclick="openAddStudentModal()" class="btn btn-primary">
                         <i data-lucide="user-plus"></i>
@@ -205,6 +227,9 @@
                         </button>
                         <button onclick="exportAttendanceToPDF()" class="btn btn-secondary" style="flex: 1;">
                             <i data-lucide="file-text"></i> Daily PDF
+                        </button>
+                        <button onclick="saveAttendanceCsv()" class="btn btn-secondary" style="flex: 1;">
+                            <i data-lucide="table"></i> Save CSV
                         </button>
                     </div>
                 </div>
@@ -299,9 +324,14 @@
                 </div>
                 <div class="score-setup-bar">
                     <p id="score-weight-summary">Set up this section's grading categories and weights.</p>
-                    <button type="button" onclick="openGradingSetup()" class="btn btn-secondary">
-                        <i data-lucide="settings-2"></i> Categories &amp; Weights
-                    </button>
+                    <div class="score-setup-actions">
+                        <button type="button" onclick="saveScoreSheetCsv()" class="btn btn-secondary">
+                            <i data-lucide="table"></i> Save CSV
+                        </button>
+                        <button type="button" onclick="openGradingSetup()" class="btn btn-secondary">
+                            <i data-lucide="settings-2"></i> Categories &amp; Weights
+                        </button>
+                    </div>
                 </div>
                 <p class="attendance-note">
                     Excel-style sheet: add multiple subsections under any category (for example 6 Written Works, 4 Quizzes, or 3 Performance Tasks). Every subsection has its own Max score, Final Grade recalculates automatically, and each section keeps its own Categories &amp; Weights setup.
@@ -441,22 +471,23 @@
         </div>
     </div>
 
-    <!-- Modal: Student QR ID card -->
+    <!-- Modal: Student QR ID card (single student or bulk section grid) -->
     <div id="modal-student-qr" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Student QR code">
-        <div class="modal-content modal-sm student-qr-modal">
+        <div id="modal-student-qr-content" class="modal-content modal-sm student-qr-modal">
             <div class="modal-header">
                 <div>
-                    <h3>Student QR Code</h3>
-                    <p class="modal-subtext">Print or show this code so the student can scan it on the check-in page.</p>
+                    <h3 id="student-qr-modal-title">Student QR Code</h3>
+                    <p id="student-qr-modal-subtext" class="modal-subtext">Print or show this code so the student can scan it on the check-in page.</p>
                 </div>
                 <button onclick="closeModal('modal-student-qr')" class="close-btn" aria-label="Close"><i data-lucide="x"></i></button>
             </div>
-            <div class="student-qr-body">
+            <div id="student-qr-single" class="student-qr-body">
                 <div id="student-qr-canvas" class="student-qr-canvas"></div>
                 <h4 id="student-qr-name">Student Name</h4>
                 <p id="student-qr-code" class="student-qr-id">Student ID</p>
                 <p class="student-qr-hint">No QR code? The student can type this ID on the check-in page instead.</p>
             </div>
+            <div id="student-qr-bulk" class="student-qr-bulk-grid hidden"></div>
             <div class="modal-footer">
                 <button type="button" onclick="closeModal('modal-student-qr')" class="btn btn-secondary">Close</button>
                 <button type="button" onclick="printStudentQr()" class="btn btn-primary">
@@ -518,12 +549,16 @@
         </div>
     </div>
 
-    <!-- Modal: Add/Edit Student -->
+    <!-- Modal: Add/Edit Student (Single or Bulk CSV/Paste) -->
     <div id="modal-student" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Add or edit student">
         <div class="modal-content">
             <div class="modal-header">
                 <h3 id="student-modal-title">Add New Student</h3>
                 <button onclick="closeModal('modal-student')" class="close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div id="student-modal-tabs" class="nav-tabs" style="width: 100%;">
+                <button type="button" id="tab-student-single" onclick="switchStudentModalMode('single')" class="tab-btn active" style="flex: 1;">Single Student</button>
+                <button type="button" id="tab-student-bulk" onclick="switchStudentModalMode('bulk')" class="tab-btn" style="flex: 1;">Bulk Paste / CSV</button>
             </div>
             <form id="form-student" onsubmit="handleStudentSubmit(event)" class="modal-form">
                 <input type="hidden" id="student-edit-id">
@@ -548,6 +583,25 @@
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-student')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Student</button>
+                </div>
+            </form>
+            <form id="form-student-bulk" onsubmit="handleBulkStudentSubmit(event)" class="modal-form hidden">
+                <div class="input-group">
+                    <label for="bulk-stud-section">Target Section</label>
+                    <select id="bulk-stud-section" class="form-control"></select>
+                </div>
+                <div class="input-group">
+                    <label for="bulk-csv-file">Load from CSV / Text File (Optional)</label>
+                    <input type="file" id="bulk-csv-file" accept=".csv,.txt" onchange="handleBulkCsvFile(event)" class="form-control">
+                </div>
+                <div class="input-group">
+                    <label for="bulk-stud-text">Paste Student Rows (one student per line: <code>Student ID, Full Name, Email</code>)</label>
+                    <textarea id="bulk-stud-text" rows="6" oninput="updateBulkStudentPreview()" placeholder="2026-0001, Juan Dela Cruz, juan@example.com&#10;2026-0002, Ana Santos, ana@example.com" class="form-control" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;"></textarea>
+                    <small id="bulk-preview-count" style="font-size: 11.5px; color: var(--text-muted);">0 students ready to import</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closeModal('modal-student')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Students</button>
                 </div>
             </form>
         </div>

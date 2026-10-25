@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createFakeSupabase, defaultDb, loadPage, waitFor, sleep } from "./helpers.mjs";
-import { installCameraStub, installSupabaseStub, makeFakeQr, todayStr, userSession } from "./stubs.mjs";
+import { installCameraStub, installLucideStub, installSupabaseStub, makeFakeQr, todayStr, userSession } from "./stubs.mjs";
 
 const TOKEN = "11111111-2222-4333-8444-555555555555";
 
@@ -16,6 +16,7 @@ test.beforeEach(() => {
 function sessionInfo(overrides = {}) {
     return {
         ok: true,
+        user_id: "user-1",
         section: "Grade 11 - STEM",
         date: todayStr(),
         closed: false,
@@ -519,3 +520,115 @@ test("host mode without a teacher login points to sign-in", async (t) => {
     assert.match(document.getElementById("problem-title").textContent, /Teacher sign-in required/i);
     assert.equal(document.getElementById("problem-signin").classList.contains("hidden"), false);
 });
+
+test("checking in reveals View my record button with session token and student-record page computes period grades and enforces device lock", async (t) => {
+    const { window, dom } = bootScan();
+    t.after(() => dom.window.close());
+    const document = window.document;
+    await waitFor(() => !document.getElementById("view-student").classList.contains("hidden"));
+
+    document.getElementById("student-id-input").value = "2026-0001";
+    document.getElementById("id-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+    const viewRecordLink = document.getElementById("result-view-record");
+    await waitFor(() => !viewRecordLink.classList.contains("hidden"), { label: "View my record link visible" });
+    assert.match(viewRecordLink.href, /student-record\.html\?/);
+    assert.match(viewRecordLink.href, /student_id=2026-0001/);
+    assert.match(viewRecordLink.href, /user_id=user-1/);
+    assert.match(viewRecordLink.href, new RegExp(`t=${TOKEN}`));
+
+    const savedLock = JSON.parse(window.localStorage.getItem("scholog_checkin_lock"));
+    const savedDeviceId = window.localStorage.getItem("scholog_device_id");
+    assert.equal(savedLock.studentId, "2026-0001");
+    assert.equal(savedLock.userId, "user-1");
+
+    // Load student-record.html for 2026-0001 -> renders attendance stats + computed Quarter 1 grade
+    const recordPage = loadPage({
+        html: "student-record.html",
+        scripts: ["student-record.js"],
+        url: viewRecordLink.href,
+        beforeParse(win) {
+            installLucideStub(win);
+            win.localStorage.setItem("scholog_device_id", savedDeviceId);
+            win.localStorage.setItem("scholog_checkin_lock", JSON.stringify(savedLock));
+            win.fetch = async () => ({
+                ok: true,
+                status: 200,
+                text: async () => JSON.stringify({
+                    ok: true,
+                    student: { name: "Juan Dela Cruz", student_id: "2026-0001", section: "Grade 11 - STEM" },
+                    attendance: [
+                        { date: "2026-10-25", status: "Present", subject: "General" },
+                        { date: "2026-10-24", status: "Late", subject: "General" }
+                    ],
+                    grading_categories: [
+                        {
+                            id: "cat-ww",
+                            name: "Written Work",
+                            weight: 40,
+                            items: [{ id: "i1", label: "WW 1", max_score: 20 }]
+                        },
+                        {
+                            id: "cat-pt",
+                            name: "Performance Task",
+                            weight: 60,
+                            items: [{ id: "p1", label: "PT 1", max_score: 50 }]
+                        }
+                    ],
+                    scores: [
+                        {
+                            date: "2026-10-25",
+                            grading_period: "Quarter 1",
+                            category_id: "cat-ww",
+                            category_name: "Written Work",
+                            category_weight: 40,
+                            item_id: "i1",
+                            item_label: "WW 1",
+                            score: 18,
+                            max_score: 20
+                        },
+                        {
+                            date: "2026-10-25",
+                            grading_period: "Quarter 1",
+                            category_id: "cat-pt",
+                            category_name: "Performance Task",
+                            category_weight: 60,
+                            item_id: "p1",
+                            item_label: "PT 1",
+                            score: 45,
+                            max_score: 50
+                        }
+                    ]
+                })
+            });
+        }
+    });
+    t.after(() => recordPage.dom.window.close());
+
+    await waitFor(() => !recordPage.window.document.getElementById("view-record").classList.contains("hidden"));
+    const recDoc = recordPage.window.document;
+    assert.equal(recDoc.getElementById("record-attendance-summary").classList.contains("hidden"), false);
+    assert.match(recDoc.getElementById("record-attendance-summary").textContent, /100%/, "Present + Late counts toward attendance rate");
+    assert.equal(recDoc.getElementById("record-grade-summary-card").classList.contains("hidden"), false);
+    assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /Quarter 1/);
+    assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /90\.00%/);
+    assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /Final/);
+
+    // Attempt to view a different student's ID (2026-0002) on the same locked phone -> blocked immediately
+    const tamperedUrl = viewRecordLink.href.replace("student_id=2026-0001", "student_id=2026-0002");
+    const blockedPage = loadPage({
+        html: "student-record.html",
+        scripts: ["student-record.js"],
+        url: tamperedUrl,
+        beforeParse(win) {
+            installLucideStub(win);
+            win.localStorage.setItem("scholog_device_id", savedDeviceId);
+            win.localStorage.setItem("scholog_checkin_lock", JSON.stringify(savedLock));
+        }
+    });
+    t.after(() => blockedPage.dom.window.close());
+
+    await waitFor(() => !blockedPage.window.document.getElementById("view-notfound").classList.contains("hidden"));
+    assert.match(blockedPage.window.document.getElementById("notfound-title").textContent, /Access restricted/i);
+});
+
