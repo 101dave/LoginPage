@@ -607,12 +607,17 @@ test("checking in reveals View my record button with session token and student-r
 
     await waitFor(() => !recordPage.window.document.getElementById("view-record").classList.contains("hidden"));
     const recDoc = recordPage.window.document;
+    assert.equal(recDoc.getElementById("record-student-name").textContent, "Juan Dela Cruz");
+    assert.match(recDoc.getElementById("record-student-id").textContent, /2026-0001/);
     assert.equal(recDoc.getElementById("record-attendance-summary").classList.contains("hidden"), false);
     assert.match(recDoc.getElementById("record-attendance-summary").textContent, /100%/, "Present + Late counts toward attendance rate");
+    assert.equal(recDoc.querySelectorAll("#record-attendance-body tr").length, 2);
     assert.equal(recDoc.getElementById("record-grade-summary-card").classList.contains("hidden"), false);
     assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /Quarter 1/);
     assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /90\.00%/);
     assert.match(recDoc.getElementById("record-grade-summary-body").textContent, /Final/);
+    assert.equal(recDoc.querySelectorAll("#record-scores-body tr").length, 2);
+    assert.match(recDoc.getElementById("record-scores-body").textContent, /90%/);
 
     // Attempt to view a different student's ID (2026-0002) on the same locked phone -> blocked immediately
     const tamperedUrl = viewRecordLink.href.replace("student_id=2026-0001", "student_id=2026-0002");

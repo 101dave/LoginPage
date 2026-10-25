@@ -311,7 +311,7 @@
                 }
             }
 
-            if (!state.userId) {
+            if (!state.userId && !state.token) {
                 $("notfound-title").textContent = "Record context missing";
                 $("notfound-text").textContent = "Please scan your QR code again from your teacher's session so your record can be loaded.";
                 setView("notfound");
@@ -320,7 +320,7 @@
 
             const rpcPayload = {
                 p_student_id: state.studentId,
-                p_user_id: state.userId
+                p_user_id: state.userId || null
             };
             if (state.token) {
                 rpcPayload.p_token = state.token;
@@ -356,11 +356,16 @@
     function renderRecord(data) {
         $("view-loading").classList.add("hidden");
 
-        $("record-student-name").textContent = data.student_name || "Student";
-        $("record-student-id").textContent = `Student ID: ${data.student_id || ""}`;
-        if (data.section) {
+        const studentObj = data.student && typeof data.student === "object" ? data.student : {};
+        const resolvedName = data.student_name || studentObj.name || "Student";
+        const resolvedId = data.student_id || studentObj.student_id || state.studentId || "";
+        const resolvedSection = data.section || studentObj.section || (state.session && state.session.section) || "";
+
+        $("record-student-name").textContent = resolvedName;
+        $("record-student-id").textContent = `Student ID: ${resolvedId}`;
+        if (resolvedSection) {
             const badge = $("record-section-badge");
-            if (badge) badge.textContent = data.section;
+            if (badge) badge.textContent = resolvedSection;
         }
 
         // --- Attendance history & overview stats ---
@@ -460,7 +465,10 @@
         } else {
             scoreEmpty.classList.add("hidden");
             scoreBody.innerHTML = scores.map((row) => {
-                const pct = row.pct != null ? `${row.pct}%` : "—";
+                const rawPct = row.pct != null
+                    ? Number(row.pct)
+                    : (Number(row.max_score) > 0 ? Math.round((Number(row.score) / Number(row.max_score)) * 1000) / 10 : null);
+                const pct = Number.isFinite(rawPct) ? `${rawPct}%` : "—";
                 const multiInCategory = scores.filter((s) =>
                     (row.category_id && s.category_id === row.category_id
                         || (!row.category_id && (s.category_name || "General") === (row.category_name || "General")))
@@ -469,10 +477,12 @@
                 const itemLabel = String(row.item_label || "").trim();
                 const showItem = itemLabel && (itemLabel !== "#1" || multiInCategory);
                 const itemSuffix = showItem ? ` · ${escapeHtml(itemLabel)}` : "";
+                const rawPeriod = row.grading_period || row.subject || "General";
+                const periodDisplay = rawPeriod === "General" ? "Unassigned" : rawPeriod;
                 return `
                     <tr>
                         <td>${escapeHtml(formatDate(row.date))}</td>
-                        <td>${escapeHtml(row.grading_period || row.subject || "General")}</td>
+                        <td>${escapeHtml(periodDisplay)}</td>
                         <td>${escapeHtml(row.category_name || "General")}${itemSuffix}${row.category_weight != null ? ` (${escapeHtml(String(row.category_weight))}%)` : ""}</td>
                         <td class="text-right font-mono">${escapeHtml(String(row.score))} / ${escapeHtml(String(row.max_score))}</td>
                         <td class="text-center"><span class="badge badge-score">${escapeHtml(pct)}</span></td>

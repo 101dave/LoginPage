@@ -80,9 +80,9 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v15/);
+    assert.match(sw, /scholog-shell-v16/);
     for (const asset of [
-        "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
+        "./scan.html", "./scan.css", "./scan.js", "./student-record.html", "./student-record.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
         "./vendor/jspdf.umd.min.js", "./vendor/jspdf.autotable.min.js", "./vendor/lucide.min.js"
     ]) {

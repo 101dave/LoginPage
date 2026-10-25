@@ -1,13 +1,14 @@
 -- Scholog — harden student record access against classmate ID enumeration
 -- and return per-section grading categories so student-record.html can show
 -- computed period grades and category breakdowns.
+-- Fixes PL/pgSQL variable shadowing between `v_session` and `public.scores sc`.
 
 drop function if exists public.get_student_record(text, uuid);
 drop function if exists public.get_student_record(text, uuid, uuid, text);
 
 create or replace function public.get_student_record(
     p_student_id text,
-    p_user_id uuid,
+    p_user_id uuid default null,
     p_token uuid default null,
     p_device_id text default null
 )
@@ -18,15 +19,37 @@ security definer
 set search_path to 'public', 'pg_temp'
 as $$
 declare
-    st public.students%rowtype;
-    s public.checkin_sessions%rowtype;
+    v_student public.students%rowtype;
+    v_session public.checkin_sessions%rowtype;
+    v_user_id uuid := p_user_id;
     v_device text := nullif(btrim(coalesce(p_device_id, '')), '');
     v_device_student text;
 begin
-    select * into st
-      from public.students
-     where user_id = p_user_id
-       and lower(student_id) = lower(btrim(coalesce(p_student_id, '')))
+    -- If token is provided, load session and resolve teacher user_id if omitted
+    if p_token is not null then
+        select * into v_session
+          from public.checkin_sessions cs
+         where cs.token = p_token;
+
+        if not found then
+            return jsonb_build_object('ok', false, 'error', 'invalid_session');
+        end if;
+
+        if v_user_id is null then
+            v_user_id := v_session.user_id;
+        elsif v_session.user_id <> v_user_id then
+            return jsonb_build_object('ok', false, 'error', 'invalid_session');
+        end if;
+    end if;
+
+    if v_user_id is null then
+        return jsonb_build_object('ok', false, 'error', 'student_not_found');
+    end if;
+
+    select * into v_student
+      from public.students st
+     where st.user_id = v_user_id
+       and lower(st.student_id) = lower(btrim(coalesce(p_student_id, '')))
      limit 1;
 
     if not found then
@@ -34,15 +57,10 @@ begin
     end if;
 
     -- When a check-in session token is supplied, ensure the token belongs to
-    -- this teacher + section, and that a device locked to one student cannot
+    -- this student's section, and that a device locked to one student cannot
     -- enumerate another classmate's ID.
     if p_token is not null then
-        select * into s
-          from public.checkin_sessions
-         where token = p_token
-           and user_id = p_user_id;
-
-        if not found or s.section <> st.section then
+        if v_session.section <> v_student.section then
             return jsonb_build_object('ok', false, 'error', 'invalid_session');
         end if;
 
@@ -53,7 +71,7 @@ begin
                and e.device_id = v_device
              limit 1;
 
-            if v_device_student is not null and lower(v_device_student) <> lower(st.student_id) then
+            if v_device_student is not null and lower(v_device_student) <> lower(v_student.student_id) then
                 return jsonb_build_object('ok', false, 'error', 'unauthorized_device');
             end if;
         end if;
@@ -61,9 +79,9 @@ begin
 
     return jsonb_build_object(
         'ok', true,
-        'student_name', st.name,
-        'student_id', st.student_id,
-        'section', st.section,
+        'student_name', v_student.name,
+        'student_id', v_student.student_id,
+        'section', v_student.section,
         'categories', coalesce((
             select jsonb_agg(
                 jsonb_build_object(
@@ -75,8 +93,8 @@ begin
                 order by gc.created_at, gc.name
             )
             from public.grading_categories gc
-            where gc.user_id = p_user_id
-              and gc.section = st.section
+            where gc.user_id = v_user_id
+              and gc.section = v_student.section
               and coalesce(gc.archived, false) = false
         ), '[]'::jsonb),
         'attendance', coalesce((
@@ -89,31 +107,31 @@ begin
                 order by a.date desc
             )
             from public.attendance a
-            where a.user_id = p_user_id
-              and a.student_id = st.student_id
+            where a.user_id = v_user_id
+              and lower(a.student_id) = lower(v_student.student_id)
         ), '[]'::jsonb),
         'scores', coalesce((
             select jsonb_agg(
                 jsonb_build_object(
-                    'date', s.date,
-                    'subject', s.subject,
-                    'grading_period', s.grading_period,
-                    'category_id', s.category_id,
-                    'category_name', s.category_name,
-                    'category_weight', s.category_weight,
-                    'item_id', s.item_id,
-                    'item_label', s.item_label,
-                    'score', s.score,
-                    'max_score', s.max_score,
-                    'pct', round((s.score / nullif(s.max_score, 0)) * 100, 1)
+                    'date', sc.date,
+                    'subject', sc.subject,
+                    'grading_period', sc.grading_period,
+                    'category_id', sc.category_id,
+                    'category_name', sc.category_name,
+                    'category_weight', sc.category_weight,
+                    'item_id', sc.item_id,
+                    'item_label', sc.item_label,
+                    'score', sc.score,
+                    'max_score', sc.max_score,
+                    'pct', round((sc.score / nullif(sc.max_score, 0)) * 100, 1)
                 )
-                order by s.date desc, s.grading_period, s.category_name, s.item_label
+                order by sc.date desc, sc.grading_period, sc.category_name, sc.item_label
             )
-            from public.scores s
+            from public.scores sc
             left join public.grading_categories gc
-              on gc.id = s.category_id
-            where s.user_id = p_user_id
-              and s.student_id = st.student_id
+              on gc.id = sc.category_id
+            where sc.user_id = v_user_id
+              and lower(sc.student_id) = lower(v_student.student_id)
               and coalesce(gc.archived, false) = false
         ), '[]'::jsonb)
     );
