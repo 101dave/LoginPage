@@ -1,10 +1,15 @@
-// Scholog — student attendance + score record page.
-// Reached from scan.html after a successful check-in:
-//   student-record.html?t=<session_token>&sid=<student_id>&uid=<teacher_user_id>
+// Scholog — student attendance + score record page & standalone QR record scanner.
 //
-// No login required. The page uses the session token + device ID to confirm the
-// check-in context, then calls the SECURITY DEFINER get_student_record() RPC to
-// fetch only this student's attendance history, scores, and computed period grades.
+// Two ways to use this page (no teacher login required):
+//   1) Reached from scan.html after a check-in:
+//        student-record.html?t=<session_token>&student_id=<student_id>&user_id=<teacher_user_id>
+//   2) Opened directly by a student even when no QR session link was sent:
+//        student-record.html
+//      The student scans their printed Student QR card (SCHOLOG:<id>), uploads a
+//      saved QR photo from their phone, or types their Student ID. The SECURITY DEFINER
+//      get_student_record() RPC resolves their record, auto-checks them in if their
+//      section currently has an open QR session, and returns their attendance,
+//      scores, and computed period grades.
 (function () {
     "use strict";
 
@@ -28,7 +33,11 @@
         studentId: "",
         userId: "",
         session: null,
-        student: null
+        student: null,
+        lookupTab: "scan",
+        scanner: null,
+        scanning: false,
+        cameraBlocked: false
     };
 
     // ---------------------------------------------------------------- helpers
@@ -48,10 +57,19 @@
     }
 
     function setView(name) {
-        ["loading", "record", "notfound"].forEach((view) => {
+        ["loading", "lookup", "record", "notfound"].forEach((view) => {
             const el = $(`view-${view}`);
             if (el) el.classList.toggle("hidden", view !== name);
         });
+        if (name !== "lookup") {
+            stopLookupScanner();
+        }
+        const scanAnotherBtn = $("scanAnotherBtn");
+        if (scanAnotherBtn) {
+            const lock = readDeviceLock(state.token);
+            const canScanAnother = name !== "lookup" && (!state.token || !lock);
+            scanAnotherBtn.classList.toggle("hidden", !canScanAnother);
+        }
     }
 
     function getParams() {
@@ -87,6 +105,41 @@
         } catch (err) {
             return null;
         }
+    }
+
+    function extractStudentId(raw) {
+        let text = String(raw == null ? "" : raw).trim();
+        if (!text) return "";
+
+        if (text.charAt(0) === "{") {
+            try {
+                const obj = JSON.parse(text);
+                text = String(obj.student_id || obj.studentId || obj.code || obj.id || "").trim();
+            } catch (err) {
+                /* keep raw */
+            }
+        }
+
+        if (/^scholog:/i.test(text)) text = text.slice(8).trim();
+
+        if (/^https?:\/\//i.test(text) || /(?:scan|student-record)\.html/i.test(text)) {
+            try {
+                const url = new URL(text, window.location.href);
+                const fromQuery = url.searchParams.get("student_id") ||
+                    url.searchParams.get("sid") ||
+                    url.searchParams.get("id") ||
+                    url.searchParams.get("student") ||
+                    url.searchParams.get("code");
+                if (fromQuery) return fromQuery.trim();
+                if (url.searchParams.get("t") || /scan\.html$/i.test(url.pathname)) {
+                    return "";
+                }
+            } catch (err) {
+                /* fall through */
+            }
+        }
+
+        return text.replace(/[\r\n\t]+/g, " ").trim().slice(0, 64);
     }
 
     function formatDate(value) {
@@ -140,6 +193,173 @@
         }
     }
 
+    // ---------------------------------------------------- standalone QR scanner
+
+    function cameraSupported() {
+        return Boolean(window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    function setLookupStageLive(live) {
+        const stage = $("lookup-scan-stage");
+        if (stage) stage.classList.toggle("is-live", live);
+        const note = $("lookup-scan-live-note");
+        if (note) note.classList.toggle("hidden", !live);
+    }
+
+    function setLookupTab(tab) {
+        state.lookupTab = tab === "id" ? "id" : "scan";
+        const isScan = state.lookupTab === "scan";
+        const tabScan = $("lookup-tab-scan");
+        const tabId = $("lookup-tab-id");
+        const panelScan = $("lookup-panel-scan");
+        const panelId = $("lookup-panel-id");
+
+        if (tabScan) {
+            tabScan.classList.toggle("active", isScan);
+            tabScan.setAttribute("aria-selected", String(isScan));
+            tabScan.tabIndex = isScan ? 0 : -1;
+        }
+        if (tabId) {
+            tabId.classList.toggle("active", !isScan);
+            tabId.setAttribute("aria-selected", String(!isScan));
+            tabId.tabIndex = !isScan ? 0 : -1;
+        }
+        if (panelScan) panelScan.classList.toggle("hidden", !isScan);
+        if (panelId) panelId.classList.toggle("hidden", isScan);
+
+        if (isScan) {
+            if (!state.scanning && !state.cameraBlocked && cameraSupported()) {
+                startLookupScanner();
+            }
+        } else {
+            stopLookupScanner();
+            const input = $("lookup-id-input");
+            if (input) input.focus();
+        }
+    }
+
+    async function startLookupScanner() {
+        const hintEl = $("lookup-camera-hint");
+        const containerId = "lookup-qr-reader";
+
+        if (!cameraSupported()) {
+            state.cameraBlocked = true;
+            if (hintEl) {
+                hintEl.textContent = "Camera scanning isn't available in this browser. Upload a QR photo or tap “Type ID”.";
+            }
+            return;
+        }
+        if (state.scanning && state.scanner) return;
+
+        const container = $(containerId);
+        if (!container) return;
+        container.classList.remove("hidden");
+
+        const scanner = new window.Html5Qrcode(containerId, { verbose: false });
+        state.scanner = scanner;
+        state.scanning = true;
+
+        try {
+            await scanner.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1.0 },
+                (decoded) => {
+                    stopLookupScanner().finally(() => {
+                        lookupStudentByCode(decoded);
+                    });
+                },
+                () => { /* frame miss */ }
+            );
+            state.cameraBlocked = false;
+            $("lookupStartScanBtn")?.classList.add("hidden");
+            $("lookupStopScanBtn")?.classList.remove("hidden");
+            if (hintEl) hintEl.textContent = "Camera on — hold your Student QR code steady inside the frame.";
+            setLookupStageLive(true);
+        } catch (err) {
+            if (state.scanner === scanner) {
+                state.scanner = null;
+                state.scanning = false;
+            }
+            state.cameraBlocked = true;
+            if (hintEl) {
+                hintEl.textContent = "Could not start the camera. You can upload a QR photo or tap “Type ID”.";
+            }
+            try { scanner.clear(); } catch (e) { /* ignore */ }
+            container.classList.add("hidden");
+            $("lookupStartScanBtn")?.classList.remove("hidden");
+            $("lookupStopScanBtn")?.classList.add("hidden");
+            setLookupStageLive(false);
+        }
+    }
+
+    async function stopLookupScanner() {
+        const containerId = "lookup-qr-reader";
+        const scanner = state.scanner;
+        state.scanner = null;
+        state.scanning = false;
+        if (scanner) {
+            try { await scanner.stop(); } catch (err) { /* ignore */ }
+            try { scanner.clear(); } catch (err) { /* ignore */ }
+        }
+        const container = $(containerId);
+        if (container) {
+            container.classList.add("hidden");
+            container.innerHTML = "";
+        }
+        $("lookupStartScanBtn")?.classList.remove("hidden");
+        $("lookupStopScanBtn")?.classList.add("hidden");
+        setLookupStageLive(false);
+    }
+
+    async function handleQrFileUpload(event) {
+        const file = event.target && event.target.files && event.target.files[0];
+        if (!file) return;
+        await stopLookupScanner();
+
+        if (!window.Html5Qrcode) {
+            showToast("QR scanner library unavailable. Please type your Student ID.", "error");
+            setLookupTab("id");
+            return;
+        }
+
+        const hintEl = $("lookup-camera-hint");
+        if (hintEl) hintEl.textContent = "Reading QR code from image…";
+
+        try {
+            const fileScanner = new window.Html5Qrcode("lookup-qr-file-scratch", { verbose: false });
+            const decoded = await fileScanner.scanFile(file, false);
+            try { fileScanner.clear(); } catch (e) { /* ignore */ }
+            event.target.value = "";
+            await lookupStudentByCode(decoded);
+        } catch (err) {
+            event.target.value = "";
+            if (hintEl) {
+                hintEl.textContent = "Could not find a valid Student QR in that image. Try another photo or tap “Type ID”.";
+            }
+            showToast("No QR code detected in that image", "error");
+        }
+    }
+
+    function openLookupView() {
+        setView("lookup");
+        setLookupTab(cameraSupported() ? "scan" : "id");
+    }
+
+    async function lookupStudentByCode(rawInput) {
+        const code = extractStudentId(rawInput);
+        if (!code) {
+            showToast("Please scan your Student QR card or enter a valid Student ID.", "error");
+            return;
+        }
+        state.studentId = code;
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set("student_id", code);
+            window.history.replaceState({}, "", url.href);
+        } catch (err) { /* ignore */ }
+        await fetchAndRenderStudentRecord();
+    }
+
     // ---------------------------------------------------- grade computation
 
     function computePeriodSummaries(scores, categories) {
@@ -151,7 +371,6 @@
         return periods.map((period) => {
             const periodScores = scores.filter((s) => (s.grading_period || s.subject || "General") === period);
 
-            // Use configured categories if available; otherwise derive from the score rows themselves.
             const effectiveCategories = cleanCategories.length > 0
                 ? cleanCategories.map((c) => ({
                     id: String(c.id || ""),
@@ -180,7 +399,6 @@
                     return [...byCat.values()];
                 })();
 
-            // Pick the latest-dated score per (category, item) within this period.
             const latestByCatItem = new Map();
             periodScores.forEach((s) => {
                 const cat = effectiveCategories.find((c) => c.id && c.id === String(s.category_id || ""))
@@ -269,7 +487,7 @@
     async function loadRecord() {
         const p = getParams();
         state.token = p.token;
-        state.studentId = p.studentId;
+        state.studentId = extractStudentId(p.studentId);
         state.userId = p.userId;
 
         const backBtn = $("backToScanBtn");
@@ -277,16 +495,20 @@
             backBtn.href = `scan.html?t=${encodeURIComponent(p.token)}`;
         }
 
-        if (!p.studentId) {
-            $("notfound-title").textContent = "Missing student ID";
-            $("notfound-text").textContent = "This record page was opened without a student ID. Ask your teacher to check you in first.";
-            setView("notfound");
+        // If no student ID was provided in the URL, open the built-in QR Scanner / ID Lookup
+        // so students can scan their QR card or enter their ID even without a teacher QR link.
+        if (!state.studentId) {
+            openLookupView();
             return;
         }
 
+        await fetchAndRenderStudentRecord();
+    }
+
+    async function fetchAndRenderStudentRecord() {
         // Prevent a locked student phone from changing ?sid= in the URL to spy on a classmate.
-        const lock = readDeviceLock(p.token);
-        if (lock && lock.studentId && lock.studentId.toLowerCase() !== p.studentId.toLowerCase()) {
+        const lock = readDeviceLock(state.token);
+        if (lock && lock.studentId && lock.studentId.toLowerCase() !== state.studentId.toLowerCase()) {
             $("notfound-title").textContent = "Access restricted";
             $("notfound-text").textContent = `This device is checked in as ${lock.name || lock.studentId}. Each phone can only view its own attendance and score record.`;
             setView("notfound");
@@ -296,9 +518,9 @@
         setView("loading");
 
         try {
-            // Confirm the session exists and resolve teacher user_id if omitted from URL.
-            if (p.token) {
-                const info = await rpc("checkin_session_info", { p_token: p.token });
+            // Confirm the session exists and resolve teacher user_id if a token is in the URL.
+            if (state.token) {
+                const info = await rpc("checkin_session_info", { p_token: state.token });
                 if (info && info.ok) {
                     state.session = info;
                     if (!state.userId && info.user_id) {
@@ -311,21 +533,14 @@
                 }
             }
 
-            if (!state.userId && !state.token) {
-                $("notfound-title").textContent = "Record context missing";
-                $("notfound-text").textContent = "Please scan your QR code again from your teacher's session so your record can be loaded.";
-                setView("notfound");
-                return;
-            }
-
             const rpcPayload = {
                 p_student_id: state.studentId,
                 p_user_id: state.userId || null
             };
+            const devId = getDeviceId();
+            if (devId) rpcPayload.p_device_id = devId;
             if (state.token) {
                 rpcPayload.p_token = state.token;
-                const devId = getDeviceId();
-                if (devId) rpcPayload.p_device_id = devId;
             }
 
             const data = await rpc("get_student_record", rpcPayload);
@@ -335,6 +550,9 @@
                 if (errCode === "unauthorized_device") {
                     $("notfound-title").textContent = "Access restricted";
                     $("notfound-text").textContent = "This phone is registered to another student for this session. You can only view the record of the student checked in on this device.";
+                } else if (errCode === "student_not_found") {
+                    $("notfound-title").textContent = "Student ID not found";
+                    $("notfound-text").textContent = `We couldn't find "${state.studentId}" on your teacher's class list. Check your QR card or Student ID and try again.`;
                 } else {
                     $("notfound-title").textContent = "Record not found";
                     $("notfound-text").textContent = errCode || "No attendance or scores found for this student.";
@@ -366,6 +584,20 @@
         if (resolvedSection) {
             const badge = $("record-section-badge");
             if (badge) badge.textContent = resolvedSection;
+        }
+
+        const checkinBanner = $("record-checkin-banner");
+        if (checkinBanner) {
+            if (data.checked_in_now) {
+                const st = data.checkin_status || "Present";
+                checkinBanner.classList.remove("hidden");
+                checkinBanner.classList.toggle("timer-late", st === "Late");
+                checkinBanner.classList.toggle("timer-ontime", st !== "Late");
+                checkinBanner.textContent = `Attendance marked ${st} for ${formatDate(data.checkin_date)}`;
+            } else {
+                checkinBanner.classList.add("hidden");
+                checkinBanner.textContent = "";
+            }
         }
 
         // --- Attendance history & overview stats ---
@@ -492,12 +724,30 @@
         }
 
         setView("record");
-        showToast("Record loaded", "success");
+        showToast(data.checked_in_now ? `Checked in (${data.checkin_status || "Present"}) & record loaded` : "Record loaded", "success");
     }
 
     // ------------------------------------------------------------------ wiring
 
+    function wireLookupEvents() {
+        $("lookup-tab-scan")?.addEventListener("click", () => setLookupTab("scan"));
+        $("lookup-tab-id")?.addEventListener("click", () => setLookupTab("id"));
+        $("lookupUseIdBtn")?.addEventListener("click", () => setLookupTab("id"));
+        $("lookupUseScanBtn")?.addEventListener("click", () => setLookupTab("scan"));
+        $("lookupStartScanBtn")?.addEventListener("click", () => startLookupScanner());
+        $("lookupStopScanBtn")?.addEventListener("click", () => stopLookupScanner());
+        $("lookupQrFileBtn")?.addEventListener("click", () => $("lookup-qr-file")?.click());
+        $("lookup-qr-file")?.addEventListener("change", handleQrFileUpload);
+        $("lookup-id-form")?.addEventListener("submit", (event) => {
+            event.preventDefault();
+            lookupStudentByCode($("lookup-id-input")?.value || "");
+        });
+        $("scanAnotherBtn")?.addEventListener("click", () => openLookupView());
+        $("notfound-scan-btn")?.addEventListener("click", () => openLookupView());
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
+        wireLookupEvents();
         loadRecord();
     });
 
