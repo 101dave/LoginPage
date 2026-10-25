@@ -109,6 +109,28 @@ scores carry grading-period, category, and subsection metadata and
   and are the only thing `anon` can execute — the class list, attendance and sessions
   stay unreadable without a teacher login.
 
+## Saving the score sheet as CSV
+
+**Student Scores → Save CSV** exports the sheet as
+`Grades_<section>_<period>_<date>.csv`, built by `csv.js` so it opens as a
+readable report in Excel rather than a bare grid:
+
+- a title block (section, grading period, score date, teacher) above the data;
+- a two-row header that groups subsections under their category —
+  `Written Work | #1 (Max 20) | #2 (Max 30)`;
+- raw scores and the computed grade written as **numbers**, so Excel can add,
+  sort and chart them (no "number stored as text" warnings);
+- empty cells for scores nobody has entered yet, never a zero;
+- class summary rows at the bottom (average, and counts of final / running /
+  no-score students) plus a generation stamp.
+
+Encoding and safety details that matter in practice: the file is UTF-8 **with a
+BOM** (`EF BB BF`) so Excel shows `José Peña` correctly instead of `JosÃ©`;
+names containing commas or quotes are quoted so columns never shift; numeric
+student IDs with a leading zero are written as `="0012"` so Excel does not eat
+the zero; and any cell that starts with `=`, `+` or `@` is prefixed with an
+apostrophe so a typed-in name cannot run as a formula.
+
 ## Backup & restore
 
 **Profile → Backup Data** downloads the whole account as one JSON file
@@ -143,7 +165,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # UI/PDF/backup/static checks (jsdom, no network)
+npm test                  # UI/PDF/CSV/backup/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
@@ -153,7 +175,8 @@ attendance saving and cloud conflict targets, daily PDF content, removal of the
 Monthly SF2 export and dark mode, student QR cards, the standalone check-in page
 (QR scan, typed ID, invalid/closed/expired sessions, host mode, live roster),
 backup/restore round trips (including legacy scores with no grading category),
-and asset/offline-cache consistency.
+the CSV report layout (title block, grouped headers, numeric cells, BOM,
+escaping) and asset/offline-cache consistency.
 
 ## Deploying to Vercel
 
@@ -176,6 +199,7 @@ public client credentials, protected by Row Level Security).
 ```
 index.html, script.js, style.css      auth UI
 main.html, main.js, main.css, pdf.js  teacher app + daily PDF builder
+csv.js                                Excel-friendly score-sheet CSV builder
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project
