@@ -118,12 +118,13 @@ body.auth-pending {
 }
 
 .brand-logo-img {
-    height: 38px;
-    width: 38px;
+    height: 34px;
+    width: 34px;
     object-fit: contain;
-    border-radius: var(--radius-sm);
+    border-radius: 9px;
     background: #ffffff;
-    padding: 2px;
+    padding: 3px;
+    box-shadow: 0 0 0 1px var(--border-light);
 }
 
 .brand h1 {
@@ -134,9 +135,14 @@ body.auth-pending {
 }
 
 .brand span {
-    font-size: 11px;
+    display: block;
+    font-size: 10px;
+    line-height: 1.3;
     color: var(--text-muted);
     font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-top: 1px;
 }
 
 .nav-tabs {
@@ -643,8 +649,14 @@ body.auth-pending {
     background-color: var(--primary);
     height: 100%;
     border-radius: 9999px;
-    transition: width 0.35s ease;
+    transition: width 0.35s ease, background-color 0.35s ease;
 }
+
+/* Attendance rate at a glance: on track / watch / needs attention. */
+.progress-fill-good { background-color: #059669; }
+.progress-fill-warn { background-color: #d97706; }
+.progress-fill-low  { background-color: #dc2626; }
+.progress-fill-idle { background-color: var(--border-light); }
 
 /* Directory & Responsive Search Action Group */
 .section-header-flex {
@@ -2340,3 +2352,28 @@ body.auth-pending {
     }
 }
 
+
+/* Keyboard users can jump past the navigation straight to the content. */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 1000;
+    padding: 10px 16px;
+    background: var(--primary);
+    color: #ffffff;
+    border-radius: 0 0 var(--radius-sm) 0;
+    font-weight: 600;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 0;
+    outline: 2px solid #ffffff;
+    outline-offset: -4px;
+}
+
+#main-content:focus {
+    outline: none;
+}

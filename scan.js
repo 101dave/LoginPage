@@ -51,6 +51,7 @@
         livePopTimer: null,
         submitting: false,
         lastCode: "",
+        recordCode: "",
         lastCodeAt: 0,
         scanner: null,
         scanning: false,
@@ -344,7 +345,24 @@
         if (state.token) url.searchParams.set("t", state.token);
         url.searchParams.set("student_id", studentId);
         if (userId) url.searchParams.set("user_id", userId);
+        if (state.recordCode) url.searchParams.set("code", state.recordCode);
         return url.href;
+    }
+
+    // The record code printed next to the Student ID on the card
+    // (`SCHOLOG:<id>:<code>`), when the payload carries one.
+    function extractRecordCode(raw) {
+        let text = String(raw == null ? "" : raw).trim();
+        if (!text) return "";
+        if (/^scholog:/i.test(text)) text = text.slice(8).trim();
+        if (/^https?:\/\//i.test(text)) {
+            try {
+                const url = new URL(text, window.location.href);
+                return (url.searchParams.get("code") || "").trim();
+            } catch (err) { return ""; }
+        }
+        const parts = text.split(":");
+        return parts.length >= 2 ? parts[1].trim() : "";
     }
 
     // Normalise whatever a QR code contains into a plain Student ID.
@@ -618,6 +636,7 @@
         }
 
         const code = extractStudentId(rawCode);
+        if (code) state.recordCode = extractRecordCode(rawCode) || state.recordCode || "";
         if (!code) {
             showResult(
                 "error",
@@ -1659,6 +1678,8 @@
         if (!token && directStudentId) {
             const target = new URL("student-record.html", window.location.href);
             target.searchParams.set("student_id", directStudentId);
+            const directCode = (params.get("code") || "").trim();
+            if (directCode) target.searchParams.set("code", directCode);
             window.location.href = target.href;
             return;
         }

@@ -104,14 +104,19 @@
             <!-- Panel: Typed Student ID -->
             <div id="lookup-panel-id" class="panel hidden" role="tabpanel" aria-labelledby="lookup-tab-id">
                 <h3 class="panel-title">Enter your Student ID</h3>
-                <p class="muted">Type the Student ID printed on your QR card or class list to view your scores and attendance.</p>
+                <p class="muted">Type the Student ID and the 8-character record code printed on your QR card to view your scores and attendance.</p>
                 <form id="lookup-id-form" class="id-form" autocomplete="off">
                     <label for="lookup-id-input" class="sr-only-label">Student ID</label>
                     <input type="text" id="lookup-id-input" name="student_id" placeholder="e.g. 12345678"
                            inputmode="text" autocapitalize="characters" spellcheck="false"
                            autocomplete="off" maxlength="64" required>
+                    <label for="lookup-code-input" class="sr-only-label">Record code</label>
+                    <input type="text" id="lookup-code-input" name="record_code" placeholder="Record code (from your QR card)"
+                           inputmode="text" autocapitalize="characters" spellcheck="false"
+                           autocomplete="off" maxlength="16">
                     <button type="submit" class="btn btn-primary btn-block btn-lg" id="lookupSubmitBtn">View My Score &amp; Attendance</button>
                 </form>
+                <p class="hint hidden" id="lookup-code-note">Your Student ID alone is not enough to open a record. The 8-character <strong>record code</strong> is printed under your Student ID on your QR card — ask your adviser if you cannot find it.</p>
                 <p class="hint">If your teacher has an open check-in session for your section today, checking your record also marks your attendance automatically.</p>
                 <button type="button" class="btn btn-ghost btn-block" id="lookupUseScanBtn">I have a QR code instead</button>
             </div>
@@ -219,7 +224,6 @@
     </footer>
 
     <script src="vendor/supabase.js"></script>
-    <script src="vendor/html5-qrcode.min.js"></script>
     <script src="student-record.js"></script>
 </body>
 </html>

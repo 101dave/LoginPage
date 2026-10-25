@@ -31,6 +31,7 @@
     const state = {
         token: "",
         studentId: "",
+        recordCode: "",
         userId: "",
         session: null,
         student: null,
@@ -77,7 +78,8 @@
         return {
             token: (params.get("t") || params.get("token") || params.get("session") || "").trim(),
             studentId: (params.get("sid") || params.get("student_id") || params.get("id") || "").trim(),
-            userId: (params.get("uid") || params.get("user_id") || "").trim()
+            userId: (params.get("uid") || params.get("user_id") || "").trim(),
+            recordCode: (params.get("code") || params.get("record_code") || "").trim()
         };
     }
 
@@ -105,6 +107,40 @@
         } catch (err) {
             return null;
         }
+    }
+
+    // Split whatever a QR code contains into the Student ID and, when present,
+    // the record code printed on the card (`SCHOLOG:<id>:<code>`).
+    function extractStudentPayload(raw) {
+        let text = String(raw == null ? "" : raw).trim();
+        if (!text) return { id: "", code: "" };
+
+        if (text.charAt(0) === "{") {
+            try {
+                const obj = JSON.parse(text);
+                return {
+                    id: String(obj.student_id || obj.studentId || obj.id || "").trim(),
+                    code: String(obj.record_code || obj.recordCode || "").trim()
+                };
+            } catch (err) { /* keep going */ }
+        }
+
+        if (/^scholog:/i.test(text)) text = text.slice(8).trim();
+        if (/^https?:\/\//i.test(text) || /(?:scan|student-record)\.html/i.test(text)) {
+            try {
+                const url = new URL(text, window.location.href);
+                return {
+                    id: (url.searchParams.get("student_id") || url.searchParams.get("sid") ||
+                        url.searchParams.get("id") || "").trim(),
+                    code: (url.searchParams.get("code") || url.searchParams.get("record_code") || "").trim()
+                };
+            } catch (err) { /* fall through */ }
+        }
+
+        // "<id>:<code>" (or "<id> <code>"); a plain ID has no separator.
+        const match = text.match(/^([^:\s]+)[:\s]+([A-Za-z0-9]{4,16})$/);
+        if (match) return { id: match[1].trim(), code: match[2].trim() };
+        return { id: text, code: "" };
     }
 
     function extractStudentId(raw) {
@@ -195,8 +231,28 @@
 
     // ---------------------------------------------------- standalone QR scanner
 
+    // The scanner library is ~367 KB and most students type their ID, so it is
+    // fetched on demand instead of on page load.
+    let qrLibPromise = null;
+    function ensureQrLib() {
+        if (window.Html5Qrcode) return Promise.resolve(true);
+        if (!qrLibPromise) {
+            qrLibPromise = new Promise((resolve) => {
+                const script = document.createElement("script");
+                script.src = "vendor/html5-qrcode.min.js";
+                script.async = true;
+                script.onload = () => resolve(Boolean(window.Html5Qrcode));
+                script.onerror = () => resolve(false);
+                document.head.appendChild(script);
+            });
+        }
+        return qrLibPromise;
+    }
+
     function cameraSupported() {
-        return Boolean(window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        // Before the library loads, assume the camera is usable: the tap below
+        // loads it and reports back if it cannot.
+        return Boolean((window.Html5Qrcode || !qrLibPromise) && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     }
 
     function setLookupStageLive(live) {
@@ -242,10 +298,18 @@
         const hintEl = $("lookup-camera-hint");
         const containerId = "lookup-qr-reader";
 
-        if (!cameraSupported()) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             state.cameraBlocked = true;
             if (hintEl) {
                 hintEl.textContent = "Camera scanning isn't available in this browser. Upload a QR photo or tap “Type ID”.";
+            }
+            return;
+        }
+        const libraryReady = await ensureQrLib();
+        if (!libraryReady) {
+            state.cameraBlocked = true;
+            if (hintEl) {
+                hintEl.textContent = "Camera scanning isn't available right now. Upload a QR photo or tap “Type ID”.";
             }
             return;
         }
@@ -316,7 +380,7 @@
         if (!file) return;
         await stopLookupScanner();
 
-        if (!window.Html5Qrcode) {
+        if (!(await ensureQrLib())) {
             showToast("QR scanner library unavailable. Please type your Student ID.", "error");
             setLookupTab("id");
             return;
@@ -340,21 +404,44 @@
         }
     }
 
+    // Shown when the server says a typed Student ID is not enough on its own.
+    // Explains where the code comes from and opens the typed-ID panel with the
+    // code field highlighted, so the student can finish in one step.
+    function showCodePrompt() {
+        openLookupView();
+        setLookupTab("id");
+        const idInput = $("lookup-id-input");
+        const codeInput = $("lookup-code-input");
+        const note = $("lookup-code-note");
+        if (idInput && state.studentId) idInput.value = state.studentId;
+        if (note) note.classList.remove("hidden");
+        if (codeInput) {
+            codeInput.required = true;
+            codeInput.focus();
+        }
+    }
+
     function openLookupView() {
         setView("lookup");
         setLookupTab(cameraSupported() ? "scan" : "id");
     }
 
-    async function lookupStudentByCode(rawInput) {
-        const code = extractStudentId(rawInput);
+    async function lookupStudentByCode(rawInput, typedCode) {
+        const parsed = extractStudentPayload(rawInput);
+        const code = parsed.id || extractStudentId(rawInput);
         if (!code) {
             showToast("Please scan your Student QR card or enter a valid Student ID.", "error");
             return;
         }
         state.studentId = code;
+        state.recordCode = String(typedCode || parsed.code || "").trim();
+        const typedField = $("lookup-code-input");
+        if (typedField && state.recordCode) typedField.value = state.recordCode;
         try {
             const url = new URL(window.location.href);
             url.searchParams.set("student_id", code);
+            if (state.recordCode) url.searchParams.set("code", state.recordCode);
+            else url.searchParams.delete("code");
             window.history.replaceState({}, "", url.href);
         } catch (err) { /* ignore */ }
         await fetchAndRenderStudentRecord();
@@ -488,6 +575,7 @@
         const p = getParams();
         state.token = p.token;
         state.studentId = extractStudentId(p.studentId);
+        state.recordCode = p.recordCode || "";
         state.userId = p.userId;
 
         const backBtn = $("backToScanBtn");
@@ -537,6 +625,7 @@
                 p_student_id: state.studentId,
                 p_user_id: state.userId || null
             };
+            if (state.recordCode) rpcPayload.p_record_code = state.recordCode;
             const devId = getDeviceId();
             if (devId) rpcPayload.p_device_id = devId;
             if (state.token) {
@@ -550,6 +639,11 @@
                 if (errCode === "unauthorized_device") {
                     $("notfound-title").textContent = "Access restricted";
                     $("notfound-text").textContent = "This phone is registered to another student for this session. You can only view the record of the student checked in on this device.";
+                } else if (errCode === "code_required") {
+                    // A typed Student ID alone no longer proves the record is
+                    // yours; ask for the code printed on the QR card.
+                    showCodePrompt();
+                    return;
                 } else if (errCode === "student_not_found") {
                     $("notfound-title").textContent = "Student ID not found";
                     $("notfound-text").textContent = `We couldn't find "${state.studentId}" on your teacher's class list. Check your QR card or Student ID and try again.`;
@@ -740,7 +834,10 @@
         $("lookup-qr-file")?.addEventListener("change", handleQrFileUpload);
         $("lookup-id-form")?.addEventListener("submit", (event) => {
             event.preventDefault();
-            lookupStudentByCode($("lookup-id-input")?.value || "");
+            lookupStudentByCode(
+                $("lookup-id-input")?.value || "",
+                $("lookup-code-input")?.value || ""
+            );
         });
         $("scanAnotherBtn")?.addEventListener("click", () => openLookupView());
         $("notfound-scan-btn")?.addEventListener("click", () => openLookupView());
