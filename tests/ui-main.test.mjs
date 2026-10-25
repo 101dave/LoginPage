@@ -29,10 +29,9 @@ function click(window, element) {
     element.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 }
 
-function setGradingRow(row, name, weight, used = true) {
+function setGradingRow(row, name, weight) {
     row.querySelector(".grading-category-name").value = name;
     row.querySelector(".grading-category-weight").value = String(weight);
-    row.querySelector(".grading-category-use").checked = used;
 }
 
 test("dashboard renders totals, present/absent counts and section breakdown", async (t) => {
@@ -188,6 +187,10 @@ test("student scores: custom maximum and grading period save separately from att
     assert.equal(document.getElementById("score-category"), null, "no single-category dropdown remains");
     assert.equal(document.getElementById("score-max"), null, "no single global maximum remains");
     assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 1);
+    assert.equal(document.querySelectorAll("#score-table-head .score-column-letter").length, 0, "no A/B/C/D column letters in header");
+    assert.equal(document.querySelector("#score-table-head .score-grid-index").textContent.trim(), "#");
+    assert.equal(document.querySelector("#score-table-head .score-grid-student").textContent.trim(), "Student");
+    assert.equal(document.querySelector("#score-table-head .score-grid-final").textContent.trim(), "Final Grade");
 
     const maxInput = document.querySelector("#score-table-head .score-column-max");
     maxInput.value = "50";
@@ -250,8 +253,8 @@ test("student scores: custom maximum and grading period save separately from att
     assert.equal(client.calls.some((c) => c.table === "scores" && c.op !== "select"), false, "saving attendance never writes scores");
 });
 
-test("student scores: shared categories, section selection and weighted final grade", async (t) => {
-    const { window, db, dom } = await bootMainApp();
+test("student scores: independent per-section categories, weights and weighted final grade", async (t) => {
+    const { window, db, dom } = await bootMainApp({ clientOptions: { enforceGradingConstraints: true } });
     t.after(() => dom.window.close());
     const document = window.document;
     const date = todayStr();
@@ -261,58 +264,74 @@ test("student scores: shared categories, section selection and weighted final gr
     await sleep(30);
     document.getElementById("score-period").value = "Quarter 1";
 
+    // Configure Grade 11 - STEM with 3 categories initially (validation rejects 101%)
     window.openGradingSetup();
-    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Written Work", 60, true);
+    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Written Work", 60);
     click(window, document.getElementById("add-grade-category-btn"));
     let rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
-    setGradingRow(rows[1], "Project", 40, true);
+    setGradingRow(rows[1], "Project", 40);
     click(window, document.getElementById("add-grade-category-btn"));
     rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
-    setGradingRow(rows[2], "Other", 1, true);
+    setGradingRow(rows[2], "Extra", 1);
 
     const form = document.getElementById("form-grading-setup");
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     await waitFor(() => !document.getElementById("grading-setup-error").classList.contains("hidden"));
-    assert.match(document.getElementById("grading-setup-error").textContent, /All category weights must total 100%/);
+    assert.match(document.getElementById("grading-setup-error").textContent, /Category weights for Grade 11 - STEM must total 100%/);
 
-    setGradingRow(rows[2], "Other", 0, true);
+    // Remove the Extra row via its remove button so STEM has Written Work (60%) + Project (40%) = 100%
+    click(window, rows[2].querySelector(".grading-category-remove"));
+    assert.equal(document.querySelectorAll("#grading-weight-rows .grading-weight-row").length, 2);
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    await waitFor(() => db.grading_categories.length === 3, { label: "three shared categories" });
-    await waitFor(() => db.section_grading_categories.filter(row => row.section === "Grade 11 - STEM").length === 3);
+    await waitFor(() => db.grading_categories.filter(row => row.section === "Grade 11 - STEM" && !row.archived).length === 2, {
+        label: "two STEM categories saved"
+    });
 
+    // Switch to Grade 11 - ABM: ABM starts with NO categories of its own (does NOT inherit STEM's setup!)
     const sectionSelect = document.getElementById("score-section");
     sectionSelect.value = "Grade 11 - ABM";
     window.loadScoreSheet();
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 0, "ABM starts clean without STEM categories");
+    assert.match(document.getElementById("score-weight-summary").textContent, /No grading categories set up for Grade 11 - ABM/);
+
+    // Configure Grade 11 - ABM with its OWN grading system, including a same-named "Written Work" at a DIFFERENT weight (25%)
     window.openGradingSetup();
     rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
-    const projectSetupRow = rows.find(row => row.querySelector(".grading-category-name").value === "Project");
-    const otherSetupRow = rows.find(row => row.querySelector(".grading-category-name").value === "Other");
-    projectSetupRow.querySelector(".grading-category-use").checked = false;
+    assert.equal(rows.length, 1, "unconfigured section starts with one blank 100% row");
+    setGradingRow(rows[0], "Written Work", 25);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[1], "Lab Practical", 45);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[2], "Final Exam", 20);
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     await waitFor(() => /must total 100%/.test(document.getElementById("grading-setup-error").textContent));
-    assert.match(document.getElementById("grading-setup-error").textContent, /Current total: 60%/);
+    assert.match(document.getElementById("grading-setup-error").textContent, /Current total: 90%/);
 
-    projectSetupRow.querySelector(".grading-category-use").checked = true;
-    otherSetupRow.querySelector(".grading-category-use").checked = false;
+    setGradingRow(rows[2], "Final Exam", 30);
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    await waitFor(() => db.section_grading_categories.filter(row => row.section === "Grade 11 - ABM").length === 2);
-    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 2, "ABM does not show the Other column");
+    await waitFor(() => db.grading_categories.filter(row => row.section === "Grade 11 - ABM" && !row.archived).length === 3);
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 3, "ABM shows its 3 categories");
+    assert.match(document.getElementById("score-weight-summary").textContent, /Written Work 25% · Lab Practical 45% · Final Exam 30%/);
 
+    // Switch back to Grade 11 - STEM: STEM's 2 categories and weights (60% / 40%) are completely untouched!
     sectionSelect.value = "Grade 11 - STEM";
     window.loadScoreSheet();
-    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 3, "STEM still shows the Other column");
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 2, "STEM still shows its 2 categories");
+    assert.match(document.getElementById("score-weight-summary").textContent, /Written Work 60% · Project 40%/);
     assert.equal(document.querySelectorAll("#score-table-body tr").length, 3);
-    assert.equal(document.querySelectorAll("#score-table-body tr:first-child .score-input").length, 3, "all category cells are visible together");
+    assert.equal(document.querySelectorAll("#score-table-body tr:first-child .score-input").length, 2, "all STEM category cells visible");
 
-    const writtenId = db.grading_categories.find(row => row.name === "Written Work").id;
-    const projectId = db.grading_categories.find(row => row.name === "Project").id;
+    const writtenId = db.grading_categories.find(row => row.section === "Grade 11 - STEM" && row.name === "Written Work").id;
+    const projectId = db.grading_categories.find(row => row.section === "Grade 11 - STEM" && row.name === "Project").id;
     let maxInput = document.querySelector(`#score-table-head .score-column-max[data-category-id="${writtenId}"]`);
     maxInput.value = "50";
     maxInput.dispatchEvent(new window.Event("change", { bubbles: true }));
     let firstScore = document.querySelector(`#score-table-body .score-input[data-category-id="${writtenId}"]`);
     firstScore.value = "40";
     firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await waitFor(() => db.scores.some(row => row.category_name === "Written Work" && row.score === 40));
+    await waitFor(() => db.scores.some(row => row.category_id === writtenId && row.score === 40));
     let finalCell = document.querySelector("#score-table-body .final-grade-cell");
     assert.match(finalCell.textContent, /80\.00%/);
     assert.match(finalCell.textContent, /Running · 60% weighted/);
@@ -323,12 +342,13 @@ test("student scores: shared categories, section selection and weighted final gr
     firstScore = document.querySelector(`#score-table-body .score-input[data-category-id="${projectId}"]`);
     firstScore.value = "60";
     firstScore.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await waitFor(() => db.scores.some(row => row.category_name === "Project" && row.score === 60));
+    await waitFor(() => db.scores.some(row => row.category_id === projectId && row.score === 60));
     assert.equal(document.querySelector(`#score-table-head .score-column-max[data-category-id="${writtenId}"]`).value, "50", "one column's Max does not change another column");
     finalCell = document.querySelector("#score-table-body .final-grade-cell");
     assert.match(finalCell.textContent, /72\.00%/);
     assert.match(finalCell.textContent, /Final/);
 
+    // Re-weight STEM to 50/50 -> ABM's Written Work (25%) stays untouched!
     window.openGradingSetup();
     rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
     rows.forEach(row => {
@@ -337,14 +357,20 @@ test("student scores: shared categories, section selection and weighted final gr
     });
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     await waitFor(() => db.scores.filter(row => row.student_id === "2026-0001" && row.date === date)
-        .every(row => row.category_weight === 50), { label: "existing score weights updated" });
+        .every(row => row.category_weight === 50), { label: "existing STEM score weights updated" });
+
+    assert.equal(
+        db.grading_categories.find(row => row.section === "Grade 11 - ABM" && row.name === "Written Work").weight,
+        25,
+        "editing STEM weights never changes ABM weights"
+    );
 
     finalCell = document.querySelector("#score-table-body .final-grade-cell");
-    assert.match(finalCell.textContent, /70\.00%/, "final grade recalculates after global weights change");
+    assert.match(finalCell.textContent, /70\.00%/, "final grade recalculates after section weights change");
     assert.match(finalCell.textContent, /Final/);
     assert.ok(db.scores.every(row => row.category_id && row.category_name && row.grading_period), "every score keeps its category metadata");
 
-    const renamedCategoryId = db.grading_categories.find(row => row.name === "Project").id;
+    const renamedCategoryId = db.grading_categories.find(row => row.section === "Grade 11 - STEM" && row.name === "Project").id;
     window.openGradingSetup();
     rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
     rows.find(row => row.querySelector(".grading-category-name").value === "Project")
@@ -357,8 +383,8 @@ test("student scores: shared categories, section selection and weighted final gr
     assert.match(document.querySelector("#score-table-body .final-grade-cell").textContent, /70\.00%/);
 
     await window.pushFullStateToCloud();
-    assert.equal(db.grading_categories.length, 3, "full restore retains shared categories");
-    assert.equal(db.section_grading_categories.length, 5, "full restore retains both sections' selections");
+    assert.equal(db.grading_categories.filter(r => !r.archived).length, 5, "full restore retains STEM (2) + ABM (3) independent categories");
+    assert.equal(db.section_grading_categories.length, 5, "full restore retains both sections' category mappings");
     assert.equal(db.scores.length, 2, "full restore retains scores");
     assert.ok(db.scores.every(row => row.category_id && ["Written Work", "Performance Task"].includes(row.category_name)));
 });
@@ -620,11 +646,10 @@ test("offline score replay reconciles backfilled categories and self-heals missi
     const db = dbWithToday();
     const backfilledId = "1e4eaa85-e640-44e1-ade6-bb7f3d8ef605";
     db.grading_categories = [
-        { id: backfilledId, user_id: "user-1", name: "General", weight: 100 }
+        { id: backfilledId, user_id: "user-1", section: "Grade 11 - STEM", name: "General", weight: 100, archived: false }
     ];
     db.section_grading_categories = [
-        { id: 1, user_id: "user-1", section: "Grade 11 - STEM", category_id: backfilledId },
-        { id: 2, user_id: "user-1", section: "Grade 11 - ABM", category_id: backfilledId }
+        { id: 1, user_id: "user-1", section: "Grade 11 - STEM", category_id: backfilledId }
     ];
     db.scores = [
         {
@@ -651,6 +676,7 @@ test("offline score replay reconciles backfilled categories and self-heals missi
     const pendingOps = queuedCategories.map((cat, idx) => ({
         t: "scr",
         date: "2026-10-24",
+        section: "Grade 11 - STEM",
         student_id: "2026-0001",
         grading_period: "General",
         category_id: cat.id,
@@ -684,18 +710,23 @@ test("offline score replay reconciles backfilled categories and self-heals missi
 
     assert.equal(db.scores.length, 5, "historical score + four replayed category scores are all stored");
     for (const cat of queuedCategories) {
-        assert.ok(db.grading_categories.some((c) => c.id === cat.id && c.name === cat.name), `created category ${cat.name}`);
+        assert.ok(
+            db.grading_categories.some((c) => c.id === cat.id && c.section === "Grade 11 - STEM" && c.name === cat.name && !c.archived),
+            `created section category ${cat.name}`
+        );
         assert.ok(db.scores.some((s) => s.category_id === cat.id && s.student_id === "2026-0001"), `synced score for ${cat.name}`);
     }
-    const totalWeight = db.grading_categories.reduce((sum, c) => sum + Number(c.weight), 0);
-    assert.equal(totalWeight, 100, "backfilled placeholder weight was retired so global weights remain 100%");
+    const sectionWeight = db.grading_categories
+        .filter((c) => c.section === "Grade 11 - STEM" && !c.archived)
+        .reduce((sum, c) => sum + Number(c.weight), 0);
+    assert.equal(sectionWeight, 100, "backfilled placeholder was archived so section weights remain 100%");
 });
 
 test("offline gradingConfig replay merges same-name backfilled category and preserves unsynced edits on failure", async (t) => {
     const db = dbWithToday();
     const backfilledId = "1e4eaa85-e640-44e1-ade6-bb7f3d8ef605";
     db.grading_categories = [
-        { id: backfilledId, user_id: "user-1", name: "General", weight: 100 }
+        { id: backfilledId, user_id: "user-1", section: "Grade 11 - STEM", name: "General", weight: 100, archived: false }
     ];
     db.scores = [
         {
@@ -793,4 +824,66 @@ test("offline gradingConfig replay merges same-name backfilled category and pres
     assert.equal(db.scores.find((s) => s.score === 89).category_id, clientGeneralId, "historical General score re-linked to client General ID");
     assert.ok(db.scores.some((s) => s.category_id === clientQuizId && s.score === 95), "queued Quizzes score synced");
 });
+
+test("removing a scored category archives it safely and section rename preserves section grading setup", async (t) => {
+    const { window, db, dom } = await bootMainApp({ clientOptions: { enforceGradingConstraints: true } });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    window.switchTab("scores");
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false);
+    await sleep(30);
+
+    // Configure Grade 11 - STEM with Quiz (40%) + Midterm (60%)
+    window.openGradingSetup();
+    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Quiz", 40);
+    click(window, document.getElementById("add-grade-category-btn"));
+    let rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[1], "Midterm", 60);
+    const form = document.getElementById("form-grading-setup");
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.filter(c => c.section === "Grade 11 - STEM" && !c.archived).length === 2);
+
+    const quizId = db.grading_categories.find(c => c.section === "Grade 11 - STEM" && c.name === "Quiz").id;
+    const quizInput = document.querySelector(`#score-table-body .score-input[data-category-id="${quizId}"]`);
+    quizInput.value = "85";
+    quizInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.some(s => s.category_id === quizId && s.score === 85));
+
+    // Remove Quiz (which has a saved score) and set Midterm to 100%
+    window.openGradingSetup();
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    click(window, rows.find(r => r.querySelector(".grading-category-name").value === "Quiz").querySelector(".grading-category-remove"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    assert.equal(rows.length, 1);
+    setGradingRow(rows[0], "Midterm", 100);
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.find(c => c.id === quizId)?.archived === true);
+
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 1, "archived Quiz column is hidden");
+    assert.ok(db.scores.some(s => s.category_id === quizId), "historical Quiz score row remains preserved in DB");
+
+    // Re-adding a new "Quiz" category later does not collide with the archived row
+    window.openGradingSetup();
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[0], "Midterm", 70);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[1], "Quiz", 30);
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.filter(c => c.section === "Grade 11 - STEM" && !c.archived).length === 2);
+
+    // Rename "Grade 11 - STEM" -> "Grade 11 - STEM A" and verify its categories follow the renamed section
+    window.switchTab("directory");
+    window.openEditSectionModal("Grade 11 - STEM");
+    document.getElementById("new-section-name").value = "Grade 11 - STEM A";
+    document.querySelector("#modal-section form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.filter(c => c.section === "Grade 11 - STEM A" && !c.archived).length === 2);
+
+    window.switchTab("scores");
+    document.getElementById("score-section").value = "Grade 11 - STEM A";
+    window.loadScoreSheet();
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 2, "renamed section keeps its categories");
+});
+
 

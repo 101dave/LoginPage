@@ -142,19 +142,32 @@ class QueryBuilder {
             if (client.enforceGradingConstraints) {
                 if (this.table === "grading_categories") {
                     for (const row of input) {
-                        const clash = table.find(
-                            (candidate) => candidate.user_id === row.user_id
-                                && candidate.name === row.name
-                                && candidate.id !== row.id
-                        );
-                        if (clash) {
+                        if (!row.section) {
                             return {
                                 data: null,
                                 error: {
-                                    code: "23505",
-                                    message: 'duplicate key value violates unique constraint "grading_categories_user_id_name_key"'
+                                    code: "23502",
+                                    message: 'null value in column "section" of relation "grading_categories" violates not-null constraint'
                                 }
                             };
+                        }
+                        if (!row.archived) {
+                            const clash = table.find(
+                                (candidate) => !candidate.archived
+                                    && candidate.user_id === row.user_id
+                                    && candidate.section === row.section
+                                    && candidate.name === row.name
+                                    && candidate.id !== row.id
+                            );
+                            if (clash) {
+                                return {
+                                    data: null,
+                                    error: {
+                                        code: "23505",
+                                        message: 'duplicate key value violates unique constraint "grading_categories_user_section_name_active_key"'
+                                    }
+                                };
+                            }
                         }
                     }
                 }

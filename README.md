@@ -58,24 +58,24 @@ links and JSON payloads.
 
 ## Recording scores and final grades
 
-Open **Student Scores → Categories & Weights** to create categories such as Written
-Work, Performance Task, Quiz, Midterm, Final Exam, Project, or Recitation. Category
-names and weights are shared across sections, while each section chooses its own
-categories. Both the global category weights and each saved section selection must
-total 100%.
+Open **Student Scores → Categories & Weights** after selecting a section to create
+that section's categories such as Written Work, Performance Task, Quiz, Midterm,
+Final Exam, Lab Practical, Project, or Recitation. Each section manages its own
+independent categories and weights totaling 100%, so different subjects and sections
+can use completely different grading systems without affecting one another.
 
 Choose a date and grading period (Quarter 1–4, Semester 1–2, or Unassigned). The
-Excel-style spreadsheet shows every selected category as its own column: students
-are rows, each category header has an independent **Max** input, and raw scores are
-entered directly in the cells. Different dates and categories can hold different
-assessments. Each category's percentage is its total raw points divided by its total
-maximum points; the final grade combines those percentages using the section's
-weights. Until every selected weighted category has a score, the table shows a
-**running grade** rather than a complete final grade.
+spreadsheet shows every category configured for the selected section as its own
+column: students are rows, each category header has an independent **Max** input,
+and raw scores are entered directly in the cells. Different dates and categories can
+hold different assessments. Each category's percentage is its total raw points
+divided by its total maximum points; the final grade combines those percentages
+using that section's weights. Until every weighted category in the section has a
+score, the table shows a **running grade** rather than a complete final grade.
 
-Apply `supabase/migrations/20261025_grading_categories.sql` before using the new
-setup. It preserves and backfills existing scores with grading-period and category
-metadata, and creates the shared category and section-selection tables.
+Apply `supabase/migrations/20261025_grading_categories.sql` and
+`supabase/migrations/20261025_per_section_grading_categories.sql` so scores carry
+grading-period and category metadata and `grading_categories` are scoped per section.
 
 ## Backend
 

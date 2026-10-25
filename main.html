@@ -304,7 +304,7 @@
                     </button>
                 </div>
                 <p class="attendance-note">
-                    Excel-style sheet: enter scores directly in each category cell. Every column has its own Max score, and Final Grade recalculates automatically. Categories and weights remain shared across sections.
+                    Excel-style sheet: enter scores directly in each category cell. Every column has its own Max score, Final Grade recalculates automatically, and each section has its own Categories &amp; Weights setup.
                 </p>
             </div>
 
@@ -330,8 +330,8 @@
         </section>
     </main>
 
-    <!-- Modal: Shared Categories & Section Grading Weights -->
-    <div id="modal-grading-setup" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Grading categories and section weights">
+    <!-- Modal: Per-Section Categories & Grading Weights -->
+    <div id="modal-grading-setup" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Section grading categories and weights">
         <div class="modal-content grading-setup-modal">
             <div class="modal-header">
                 <div>
@@ -341,15 +341,14 @@
                 <button type="button" onclick="closeModal('modal-grading-setup')" class="close-btn" aria-label="Close modal"><i data-lucide="x"></i></button>
             </div>
             <form id="form-grading-setup" onsubmit="saveGradingSetup(event)" class="modal-form">
-                <p class="modal-body-copy">Add categories such as Written Work, Performance Task, Quiz, Midterm, Final Exam, or your own. Weights are shared across sections; “Use” selects the categories for this section.</p>
-                <div class="grading-weight-head" aria-hidden="true"><span>Use</span><span>Category</span><span>Global weight</span></div>
+                <p class="modal-body-copy">Add categories for this section such as Written Work, Performance Task, Quiz, Midterm, Lab, or Final Exam. Each section keeps its own independent grading setup totaling 100%.</p>
+                <div class="grading-weight-head" aria-hidden="true"><span>Category</span><span>Weight</span><span></span></div>
                 <div id="grading-weight-rows" class="grading-weight-rows"></div>
                 <button type="button" id="add-grade-category-btn" onclick="addGradingCategoryRow()" class="btn btn-secondary grading-add-category">
                     <i data-lucide="plus"></i> Add Category
                 </button>
                 <div class="grading-totals">
-                    <div id="grading-global-total" class="grading-weight-total" aria-live="polite">All categories: 0%</div>
-                    <div id="grading-section-total" class="grading-weight-total" aria-live="polite">This section: 0%</div>
+                    <div id="grading-section-total" class="grading-weight-total" aria-live="polite">Section total: 0%</div>
                 </div>
                 <p id="grading-setup-error" class="grading-setup-error hidden" role="alert"></p>
                 <div class="modal-footer">
