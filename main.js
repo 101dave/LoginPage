@@ -3208,16 +3208,10 @@ function exportAttendanceToPDF() {
     }
 }
 
-function csvEscapeCell(val) {
-    const str = String(val ?? "");
-    if (/[",\r\n]/.test(str)) {
-        return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
-}
-
-function triggerCsvSave(filename, rows) {
-    const csvBody = "\uFEFF" + rows.map(row => row.map(csvEscapeCell).join(",")).join("\r\n");
+// CSV export goes through csv.js so the downloaded report has a title block,
+// grouped headers and real numbers that Excel can add up (see tests/csv.test.mjs).
+function triggerCsvSave(filename, csvText) {
+    const csvBody = window.SchologCsv ? window.SchologCsv.withBom(csvText) : "\uFEFF" + csvText;
     const blob = new Blob([csvBody], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -3245,59 +3239,78 @@ function saveScoreSheetCsv() {
         showToast("Configure grading categories for this section first.", "error");
         return;
     }
+    if (!window.SchologCsv) {
+        showToast("The CSV builder did not load. Refresh the page and try again.", "error");
+        return;
+    }
 
-    const periodLabel = period === "General" ? "Unassigned" : period;
-    const colDescriptors = [];
-    categories.forEach(cat => {
-        const items = getCategoryItems(cat);
-        items.forEach(item => {
+    // Columns follow the on-screen spreadsheet: every subsection under its
+    // category, in the same order the teacher sees them.
+    const categoryModel = categories.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        items: getCategoryItems(cat).map(item => {
             const firstSaved = secStudents
                 .map(stud => findScoreRecord(date, stud.student_id, period, cat, item).value)
                 .find(Boolean);
             const configuredMax = Number(item.period_max?.[period]) || Number(item.max_score) || 100;
-            const maxVal = Number(firstSaved?.max_score) > 0 ? Number(firstSaved.max_score) : configuredMax;
-            const colTitle = items.length > 1
-                ? `${cat.name} - ${item.label} (Max ${maxVal})`
-                : `${cat.name} (Max ${maxVal})`;
-            colDescriptors.push({ cat, item, maxVal, colTitle });
-        });
-    });
+            const max = Number(firstSaved?.max_score) > 0 ? Number(firstSaved.max_score) : configuredMax;
+            return { label: item.label, max };
+        })
+    }));
 
-    const header = [
-        "Student ID",
-        "Student Name",
-        "Section",
-        "Grading Period",
-        ...colDescriptors.map(d => d.colTitle),
-        "Computed Grade (%)",
-        "Status"
-    ];
-    const rows = [header];
-
-    secStudents.forEach(stud => {
-        const itemCells = colDescriptors.map(({ cat, item }) => {
-            const rec = findScoreRecord(date, stud.student_id, period, cat, item);
-            return rec.value ? rec.value.score : "";
+    let finalCount = 0;
+    let runningCount = 0;
+    let noScoreCount = 0;
+    const graded = [];
+    const students = secStudents.map(stud => {
+        const scores = [];
+        categories.forEach(cat => {
+            getCategoryItems(cat).forEach(item => {
+                const rec = findScoreRecord(date, stud.student_id, period, cat, item);
+                scores.push(rec.value ? Number(rec.value.score) : null);
+            });
         });
         const finalRes = calculateStudentFinalGrade(stud.student_id, sec, period);
-        const gradeCell = finalRes.grade != null ? finalRes.grade.toFixed(2) : "";
-        const statusCell = finalRes.grade == null
-            ? "No scores"
-            : (!finalRes.weightsValid ? "Check weights" : (finalRes.complete ? "Final" : `Running (${Number(finalRes.coveredWeight.toFixed(2))}%)`));
-        rows.push([
-            stud.student_id,
-            stud.name,
-            stud.section,
-            periodLabel,
-            ...itemCells,
-            gradeCell,
-            statusCell
-        ]);
+        const grade = finalRes.grade == null ? null : Number(finalRes.grade);
+        let status;
+        if (grade == null) {
+            status = "No scores";
+            noScoreCount += 1;
+        } else if (!finalRes.weightsValid) {
+            status = "Check weights";
+        } else if (finalRes.complete) {
+            status = "Final";
+            finalCount += 1;
+        } else {
+            status = `Running (${Number(finalRes.coveredWeight.toFixed(2))}%)`;
+            runningCount += 1;
+        }
+        if (grade != null && finalRes.weightsValid) graded.push(grade);
+        return { student_id: stud.student_id, name: stud.name, scores, grade, status };
     });
 
-    const safeSec = sec.replace(/[^a-z0-9_-]+/gi, "_");
-    const safePeriod = periodLabel.replace(/[^a-z0-9_-]+/gi, "_");
-    triggerCsvSave(`Grades_${safeSec}_${safePeriod}_${date}.csv`, rows);
+    const classAverage = graded.length > 0
+        ? graded.reduce((sum, value) => sum + value, 0) / graded.length
+        : null;
+
+    const csv = window.SchologCsv.buildScoreSheetCsv({
+        title: `Scholog — Student Score Sheet`,
+        section: sec,
+        period: period === "General" ? "Unassigned" : period,
+        date,
+        generatedAt: new Date(),
+        categories: categoryModel,
+        students,
+        summary: {
+            classAverage,
+            withFinal: finalCount,
+            withRunning: runningCount,
+            withoutScores: noScoreCount
+        }
+    });
+
+    triggerCsvSave(csv.filename, csv.text);
     showToast(`Grades CSV saved (${secStudents.length} students).`, "success");
 }
 
