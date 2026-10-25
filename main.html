@@ -304,7 +304,7 @@
                     </button>
                 </div>
                 <p class="attendance-note">
-                    Excel-style sheet: enter scores directly in each category cell. Every column has its own Max score, Final Grade recalculates automatically, and each section has its own Categories &amp; Weights setup.
+                    Excel-style sheet: add multiple subsections under any category (for example 6 Written Works, 4 Quizzes, or 3 Performance Tasks). Every subsection has its own Max score, Final Grade recalculates automatically, and each section keeps its own Categories &amp; Weights setup.
                 </p>
             </div>
 
@@ -324,7 +324,7 @@
                 </div>
                 <div class="score-sheet-legend">
                     <span><i data-lucide="mouse-pointer-2"></i> Click a cell, type the raw score, then press Enter or leave the cell to save.</span>
-                    <span>Max scores are edited in each category header.</span>
+                    <span>Click <strong>+ Add</strong> on any category header to add subsections, each with its own Max score.</span>
                 </div>
             </div>
         </section>
@@ -341,8 +341,8 @@
                 <button type="button" onclick="closeModal('modal-grading-setup')" class="close-btn" aria-label="Close modal"><i data-lucide="x"></i></button>
             </div>
             <form id="form-grading-setup" onsubmit="saveGradingSetup(event)" class="modal-form">
-                <p class="modal-body-copy">Add categories for this section such as Written Work, Performance Task, Quiz, Midterm, Lab, or Final Exam. Each section keeps its own independent grading setup totaling 100%.</p>
-                <div class="grading-weight-head" aria-hidden="true"><span>Category</span><span>Weight</span><span></span></div>
+                <p class="modal-body-copy">Add categories for this section (Written Work, Performance Task, Quiz, Midterm, etc.), set how many subsections/items each category has (e.g. 6 Written Works), and assign weights totaling 100%.</p>
+                <div class="grading-weight-head" aria-hidden="true"><span>Category</span><span>Subsections</span><span>Weight</span><span></span></div>
                 <div id="grading-weight-rows" class="grading-weight-rows"></div>
                 <button type="button" id="add-grade-category-btn" onclick="addGradingCategoryRow()" class="btn btn-secondary grading-add-category">
                     <i data-lucide="plus"></i> Add Category

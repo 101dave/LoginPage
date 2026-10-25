@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v11/);
+    assert.match(sw, /scholog-shell-v12/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -139,9 +139,10 @@ test("attendance writes target the real composite unique key", () => {
     assert.match(source, /subject: "General"/);
 });
 
-test("grading migration preserves scores and scopes categories per section", () => {
+test("grading migration preserves scores and scopes categories and subsections per section", () => {
     const sql = read("supabase/migrations/20261025_grading_categories.sql");
     const perSecSql = read("supabase/migrations/20261025_per_section_grading_categories.sql");
+    const itemsSql = read("supabase/migrations/20261025_grading_category_items.sql");
     const main = read("main.js");
     const html = read("main.html");
     assert.match(sql, /create table if not exists public\.grading_categories/);
@@ -161,7 +162,13 @@ test("grading migration preserves scores and scopes categories per section", () 
     assert.match(perSecSql, /on public\.grading_categories \(user_id, section, name\)\s+where \(not archived\)/);
     assert.match(perSecSql, /notify pgrst, 'reload schema'/);
 
-    assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id"/);
+    assert.match(itemsSql, /add column if not exists items jsonb not null default '\[\]'::jsonb/);
+    assert.match(itemsSql, /add column if not exists item_id text/);
+    assert.match(itemsSql, /add column if not exists item_label text/);
+    assert.match(itemsSql, /on public\.scores \(user_id, date, student_id, grading_period, category_id, item_id\)/);
+    assert.match(itemsSql, /notify pgrst, 'reload schema'/);
+
+    assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id,item_id"/);
     assert.doesNotMatch(html, /grading-global-total/);
     assert.doesNotMatch(main, /score-column-letter/);
 });

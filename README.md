@@ -60,22 +60,27 @@ links and JSON payloads.
 
 Open **Student Scores → Categories & Weights** after selecting a section to create
 that section's categories such as Written Work, Performance Task, Quiz, Midterm,
-Final Exam, Lab Practical, Project, or Recitation. Each section manages its own
-independent categories and weights totaling 100%, so different subjects and sections
-can use completely different grading systems without affecting one another.
+Final Exam, Lab Practical, Project, or Recitation, along with how many **subsections**
+each category starts with (for example, 6 Written Works, 4 Quizzes, or 3 Performance
+Tasks). Each section manages its own independent categories and weights totaling
+100%, so different subjects and sections can use completely different grading
+systems without affecting one another.
 
 Choose a date and grading period (Quarter 1–4, Semester 1–2, or Unassigned). The
-spreadsheet shows every category configured for the selected section as its own
-column: students are rows, each category header has an independent **Max** input,
-and raw scores are entered directly in the cells. Different dates and categories can
-hold different assessments. Each category's percentage is its total raw points
-divided by its total maximum points; the final grade combines those percentages
-using that section's weights. Until every weighted category in the section has a
-score, the table shows a **running grade** rather than a complete final grade.
+spreadsheet groups subsections under each parent category header: teachers can add
+(`+ Add`), rename, or remove (`×`) subsections directly in the table header, set an
+independent **Max** score per subsection (e.g. `15`, `20`, `25`, `30`, `50`, `100` —
+never locked to `100`), and enter raw scores directly in the cells. Each category's
+percentage is the sum of its subsections' raw points divided by the sum of their
+maximum points; the final grade combines those category percentages using that
+section's weights. Until every weighted subsection in the section has a score, the
+table shows a **running grade** rather than a complete final grade.
 
-Apply `supabase/migrations/20261025_grading_categories.sql` and
-`supabase/migrations/20261025_per_section_grading_categories.sql` so scores carry
-grading-period and category metadata and `grading_categories` are scoped per section.
+Apply `supabase/migrations/20261025_grading_categories.sql`,
+`supabase/migrations/20261025_per_section_grading_categories.sql`, and
+`supabase/migrations/20261025_grading_category_items.sql` so scores carry
+grading-period, category, and subsection metadata and `grading_categories` store
+per-section categories and their subsections.
 
 ## Backend
 

@@ -183,6 +183,15 @@ class QueryBuilder {
                                 }
                             };
                         }
+                        if (!row.item_id) {
+                            return {
+                                data: null,
+                                error: {
+                                    code: "23502",
+                                    message: 'null value in column "item_id" of relation "scores" violates not-null constraint'
+                                }
+                            };
+                        }
                     }
                 }
             }
@@ -192,7 +201,12 @@ class QueryBuilder {
             input.forEach((row) => {
                 let existing = null;
                 if (conflict.length > 0) {
-                    existing = table.find((candidate) => conflict.every((col) => candidate[col] === row[col]));
+                    existing = table.find((candidate) => conflict.every((col) => {
+                        if (this.table === "scores" && col === "item_id") {
+                            return (candidate.item_id || "") === (row.item_id || "");
+                        }
+                        return candidate[col] === row[col];
+                    }));
                 }
                 if (existing) {
                     Object.assign(existing, row);

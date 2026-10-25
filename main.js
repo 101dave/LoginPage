@@ -109,19 +109,21 @@ function parseAttKey(key) {
 }
 
 function parseScoreKey(key) {
-    // Key format: YYYY-MM-DD_STUDENTID_SUBJECT
+    // Key format: YYYY-MM-DD_STUDENTID_PERIOD[\u001fCATEGORY[\u001fITEM]]
     // Date is always 10 chars (YYYY-MM-DD), then "_", then studentId, then "_", then subject.
-    // Use the LAST underscore to split the stored grading period (values such as
-    // "General" and "Quarter 1" never contain "_"), so student IDs with "_" survive.
+    // Split on the LAST underscore before SCORE_KEY_SEPARATOR so student IDs,
+    // category keys, and item IDs containing "_" all survive cleanly.
     if (key.length < 12) return { date: "", studentId: "", subject: "" };
     const date = key.slice(0, 10);
     if (key.charAt(10) !== "_") return { date: "", studentId: "", subject: "" };
     const rest = key.slice(11);
-    const lastUnderscore = rest.lastIndexOf("_");
-    if (lastUnderscore === -1) return { date, studentId: rest, subject: "" };
+    const sepIdx = rest.indexOf(SCORE_KEY_SEPARATOR);
+    const head = sepIdx === -1 ? rest : rest.slice(0, sepIdx);
+    const lastUnderscore = head.lastIndexOf("_");
+    if (lastUnderscore === -1) return { date, studentId: head, subject: "" };
     return {
         date,
-        studentId: rest.slice(0, lastUnderscore),
+        studentId: head.slice(0, lastUnderscore),
         subject: rest.slice(lastUnderscore + 1)
     };
 }
@@ -130,15 +132,19 @@ function parseLegacyScoreSubject(subject) {
     const value = String(subject || "General");
     const separatorIndex = value.indexOf(SCORE_KEY_SEPARATOR);
     if (separatorIndex === -1) return { period: value || "General", category: "General" };
+    const afterFirst = value.slice(separatorIndex + 1);
+    const secondSep = afterFirst.indexOf(SCORE_KEY_SEPARATOR);
+    const categoryPart = secondSep === -1 ? afterFirst : afterFirst.slice(0, secondSep);
     return {
         period: value.slice(0, separatorIndex) || "General",
-        category: value.slice(separatorIndex + 1) || "General"
+        category: categoryPart || "General"
     };
 }
 
-function makeScoreRecordKey(date, studentId, gradingPeriod, categoryId, categoryName) {
+function makeScoreRecordKey(date, studentId, gradingPeriod, categoryId, categoryName, itemId = "") {
     const categoryKey = categoryId || `legacy-${categoryName || "General"}`;
-    return `${date}_${studentId}_${gradingPeriod || "General"}${SCORE_KEY_SEPARATOR}${categoryKey}`;
+    const itemPart = itemId ? `${SCORE_KEY_SEPARATOR}${itemId}` : "";
+    return `${date}_${studentId}_${gradingPeriod || "General"}${SCORE_KEY_SEPARATOR}${categoryKey}${itemPart}`;
 }
 
 function newCategoryId() {
@@ -147,6 +153,46 @@ function newCategoryId() {
         const random = Math.floor(Math.random() * 16);
         const value = char === "x" ? random : (random & 0x3) | 0x8;
         return value.toString(16);
+    });
+}
+
+function sanitizeCategoryItems(rawItems, fallbackCount = 1, cloneIds = false) {
+    const clean = [];
+    const seenIds = new Set();
+    if (Array.isArray(rawItems) && rawItems.length > 0) {
+        rawItems.slice(0, 30).forEach((rawItem, idx) => {
+            let id = cloneIds ? newCategoryId() : String(rawItem?.id || "").trim();
+            if (!id || seenIds.has(id)) id = newCategoryId();
+            seenIds.add(id);
+            const label = String(rawItem?.label || "").trim().slice(0, 40) || `#${idx + 1}`;
+            const maxNum = Number(rawItem?.max_score);
+            const maxScore = Number.isFinite(maxNum) && maxNum > 0 ? maxNum : 100;
+            const periodMax = {};
+            if (rawItem?.period_max && typeof rawItem.period_max === "object" && !Array.isArray(rawItem.period_max)) {
+                Object.keys(rawItem.period_max).forEach(period => {
+                    const val = Number(rawItem.period_max[period]);
+                    if (Number.isFinite(val) && val > 0) periodMax[period] = val;
+                });
+            }
+            clean.push({ id, label, max_score: maxScore, period_max: periodMax });
+        });
+    }
+    if (clean.length === 0) {
+        const count = Math.max(1, Math.min(30, Math.round(Number(fallbackCount) || 1)));
+        for (let i = 0; i < count; i++) {
+            clean.push({ id: newCategoryId(), label: `#${i + 1}`, max_score: 100, period_max: {} });
+        }
+    }
+    return clean;
+}
+
+function categoryItemsForCloud(items) {
+    return sanitizeCategoryItems(items).map(item => {
+        const out = { id: item.id, label: item.label, max_score: item.max_score };
+        if (item.period_max && Object.keys(item.period_max).length > 0) {
+            out.period_max = item.period_max;
+        }
+        return out;
     });
 }
 
@@ -184,7 +230,8 @@ function sanitizeGradeCategories(value, legacySectionMap = null, fallbackSection
             const key = `${section.toLowerCase()}\n${name.toLowerCase()}`;
             if (seen.has(key)) return;
             seen.add(key);
-            clean.push({ id, section, name, weight, _sourceId: index > 0 ? rawId : null });
+            const items = sanitizeCategoryItems(category?.items, category?.itemCount || 1, index > 0);
+            clean.push({ id, section, name, weight, items, _sourceId: index > 0 ? rawId : null });
         });
     });
     return clean;
@@ -262,7 +309,7 @@ function normalizeState(raw) {
         if (cat._sourceId) {
             clonedIdBySourceAndSection.set(`${cat._sourceId}::${cat.section}`, cat.id);
         }
-        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight };
+        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight, items: cat.items };
     });
     gradeCategories.forEach(cat => {
         if (cat.section && !sections.includes(cat.section)) sections.push(cat.section);
@@ -285,7 +332,15 @@ function normalizeState(raw) {
         const remappedId = (value.category_id && studSection && clonedIdBySourceAndSection.get(`${value.category_id}::${studSection}`))
             || value.category_id
             || null;
-        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, remappedId, categoryName);
+        const matchedCat = gradeCategories.find(c => c.id === remappedId)
+            || gradeCategories.find(c => (!studSection || c.section === studSection) && c.name === categoryName);
+        const matchedItem = matchedCat
+            ? (matchedCat.items.find(i => i.id === value.item_id)
+                || ((!value.item_id || value.item_id === "item-1") ? matchedCat.items[0] : null))
+            : null;
+        const itemId = matchedItem?.id || value.item_id || "";
+        const itemLabel = matchedItem?.label || value.item_label || "#1";
+        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, remappedId, categoryName, itemId);
         scores[normalizedKey] = {
             ...value,
             date: parsed.date,
@@ -294,7 +349,9 @@ function normalizeState(raw) {
             grading_period: gradingPeriod,
             category_id: remappedId,
             category_name: categoryName,
-            category_weight: Number(value.category_weight ?? 100)
+            category_weight: Number(value.category_weight ?? 100),
+            item_id: itemId || null,
+            item_label: itemLabel
         };
     });
 
@@ -486,7 +543,7 @@ async function fetchCloudState() {
         if (cat._sourceId) {
             clonedIdBySourceAndSection.set(`${cat._sourceId}::${cat.section}`, cat.id);
         }
-        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight };
+        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight, items: cat.items };
     });
     const sectionGradeCategories = sanitizeSectionGradeCategories(legacySectionMap, gradeCategories);
     const studentSectionByCode = new Map(students.map(s => [s.student_id, s.section]));
@@ -504,7 +561,13 @@ async function fetchCloudState() {
             || gradeCategories.find(item => (!studSection || item.section === studSection) && item.name === categoryName);
         const categoryId = remappedId || category?.id || null;
         const categoryWeight = Number(row.category_weight ?? category?.weight ?? 100);
-        const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName);
+        const matchedItem = category
+            ? (category.items.find(i => i.id === row.item_id)
+                || ((!row.item_id || row.item_id === "item-1") ? category.items[0] : null))
+            : null;
+        const itemId = matchedItem?.id || row.item_id || "";
+        const itemLabel = matchedItem?.label || row.item_label || "#1";
+        const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName, itemId);
         scores[key] = {
             score: row.score,
             max_score: row.max_score,
@@ -514,7 +577,9 @@ async function fetchCloudState() {
             grading_period: gradingPeriod,
             category_id: categoryId,
             category_name: categoryName,
-            category_weight: categoryWeight
+            category_weight: categoryWeight,
+            item_id: itemId || null,
+            item_label: itemLabel
         };
     });
 
@@ -573,21 +638,36 @@ function applyScoreOpToLocalState(row) {
         || state.sections[0]
         || ""
     ).trim();
-    if (categoryId && categoryName && studSection && !state.gradeCategories.some(item => item.id === categoryId)) {
+    let category = categoryId ? state.gradeCategories.find(item => item.id === categoryId) : null;
+    if (!category && categoryId && categoryName && studSection) {
         const sameName = state.gradeCategories.find(
             item => item.section === studSection && item.name.toLowerCase() === String(categoryName).toLowerCase()
         );
         if (!sameName) {
-            state.gradeCategories.push({
+            category = {
                 id: String(categoryId),
                 section: studSection,
                 name: String(categoryName).trim(),
-                weight: Number.isFinite(categoryWeight) ? Math.min(Math.max(categoryWeight, 0), 100) : 0
-            });
+                weight: Number.isFinite(categoryWeight) ? Math.min(Math.max(categoryWeight, 0), 100) : 0,
+                items: sanitizeCategoryItems(row.item_id ? [{ id: row.item_id, label: row.item_label || "#1", max_score: row.max_score || 100 }] : null)
+            };
+            state.gradeCategories.push(category);
             state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
+        } else {
+            category = sameName;
         }
     }
-    const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName);
+    if (category && row.item_id && row.item_id !== "item-1" && !category.items.some(i => i.id === row.item_id)) {
+        category.items.push({
+            id: String(row.item_id),
+            label: String(row.item_label || `#${category.items.length + 1}`).trim(),
+            max_score: Number(row.max_score) > 0 ? Number(row.max_score) : 100,
+            period_max: {}
+        });
+    }
+    const itemId = row.item_id || category?.items?.[0]?.id || "";
+    const itemLabel = row.item_label || category?.items?.find(i => i.id === itemId)?.label || "#1";
+    const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName, itemId);
     state.scores[key] = {
         score: Number(row.score),
         max_score: Number(row.max_score ?? 100),
@@ -597,7 +677,9 @@ function applyScoreOpToLocalState(row) {
         grading_period: gradingPeriod,
         category_id: categoryId,
         category_name: categoryName,
-        category_weight: Number.isFinite(categoryWeight) ? categoryWeight : 100
+        category_weight: Number.isFinite(categoryWeight) ? categoryWeight : 100,
+        item_id: itemId || null,
+        item_label: itemLabel
     };
 }
 
@@ -623,7 +705,7 @@ function applyPendingOpsToLocalState(ops) {
             case "gradingConfig":
                 if (Array.isArray(op.categories) && op.section) {
                     const sectionCategories = sanitizeGradeCategories(op.categories, null, op.section)
-                        .map(cat => ({ id: cat.id, section: op.section, name: cat.name, weight: cat.weight }));
+                        .map(cat => ({ id: cat.id, section: op.section, name: cat.name, weight: cat.weight, items: cat.items }));
                     state.gradeCategories = [
                         ...state.gradeCategories.filter(cat => cat.section !== op.section),
                         ...sectionCategories
@@ -698,6 +780,7 @@ function queueOp(op) {
                 && e.student_id === op.student_id
                 && e.grading_period === op.grading_period
                 && e.category_id === op.category_id
+                && (e.item_id || "") === (op.item_id || "")
             ));
         } else if (op.t === "gradingConfig") {
             out = q.filter(e => !(e.t === "gradingConfig" && e.section === op.section));
@@ -765,6 +848,12 @@ function scoreRowForCloud(row, uid) {
         || state.gradeCategories.find(item => item.section === studSection && item.name === categoryName);
     const categoryId = category?.id || row.category_id;
     if (!categoryId) throw new Error(`Set up the ${categoryName} grading category before syncing this score.`);
+    const matchedItem = category?.items
+        ? (category.items.find(i => i.id === row.item_id)
+            || ((!row.item_id || row.item_id === "item-1") ? category.items[0] : null))
+        : null;
+    const itemId = matchedItem?.id || row.item_id || "item-1";
+    const itemLabel = matchedItem?.label || row.item_label || "#1";
     return {
         user_id: uid,
         date: row.date,
@@ -774,6 +863,8 @@ function scoreRowForCloud(row, uid) {
         category_id: categoryId,
         category_name: category?.name || categoryName,
         category_weight: category?.weight ?? row.category_weight ?? 100,
+        item_id: itemId,
+        item_label: itemLabel,
         score: Number(row.score),
         max_score: Number(row.max_score ?? 100)
     };
@@ -801,6 +892,8 @@ async function reconcileCategoryByNameInCloud(uid, section, existingSectionCateg
 
     const clash = existingSectionCategories[clashIndex];
     const targetExists = existingSectionCategories.some(row => row.id === category.id);
+    const cloudItems = categoryItemsForCloud(category.items);
+    const primaryTargetItem = cloudItems[0];
 
     must(await supabaseClient.from("grading_categories")
         .update({ name: `${migratingPrefix}${clash.id}`, updated_at: timestamp })
@@ -813,6 +906,7 @@ async function reconcileCategoryByNameInCloud(uid, section, existingSectionCateg
         section,
         name: category.name,
         weight: category.weight,
+        items: cloudItems,
         archived: false,
         updated_at: timestamp
     }, { onConflict: "id" }));
@@ -820,20 +914,26 @@ async function reconcileCategoryByNameInCloud(uid, section, existingSectionCateg
     if (targetExists) {
         const { data: targetScores, error: targetErr } = await supabaseClient
             .from("scores")
-            .select("date, student_id, grading_period")
+            .select("date, student_id, grading_period, item_id")
             .eq("user_id", uid)
             .eq("category_id", category.id);
         if (targetErr) throw targetErr;
         if (targetScores && targetScores.length > 0) {
             const { data: clashScores, error: clashErr } = await supabaseClient
                 .from("scores")
-                .select("id, date, student_id, grading_period")
+                .select("id, date, student_id, grading_period, item_id")
                 .eq("user_id", uid)
                 .eq("category_id", clash.id);
             if (clashErr) throw clashErr;
-            const targetKeys = new Set(targetScores.map(r => `${r.date}|${r.student_id}|${r.grading_period}`));
+            const targetKeys = new Set(targetScores.map(r => `${r.date}|${r.student_id}|${r.grading_period}|${r.item_id || ""}`));
             const duplicateIds = (clashScores || [])
-                .filter(r => targetKeys.has(`${r.date}|${r.student_id}|${r.grading_period}`))
+                .filter(r => {
+                    const mappedItem = (!Array.isArray(clash.items) || clash.items.length <= 1) && primaryTargetItem
+                        ? primaryTargetItem.id
+                        : (r.item_id || "");
+                    return targetKeys.has(`${r.date}|${r.student_id}|${r.grading_period}|${mappedItem}`)
+                        || targetKeys.has(`${r.date}|${r.student_id}|${r.grading_period}|${r.item_id || ""}`);
+                })
                 .map(r => r.id);
             if (duplicateIds.length > 0) {
                 must(await supabaseClient.from("scores").delete().eq("user_id", uid).in("id", duplicateIds));
@@ -841,11 +941,16 @@ async function reconcileCategoryByNameInCloud(uid, section, existingSectionCateg
         }
     }
 
-    must(await supabaseClient.from("scores").update({
+    const scorePatch = {
         category_id: category.id,
         category_name: category.name,
         category_weight: category.weight
-    }).eq("user_id", uid).eq("category_id", clash.id));
+    };
+    if ((!Array.isArray(clash.items) || clash.items.length <= 1) && primaryTargetItem) {
+        scorePatch.item_id = primaryTargetItem.id;
+        scorePatch.item_label = primaryTargetItem.label;
+    }
+    must(await supabaseClient.from("scores").update(scorePatch).eq("user_id", uid).eq("category_id", clash.id));
 
     must(await supabaseClient.from("section_grading_categories")
         .delete()
@@ -869,13 +974,14 @@ async function reconcileCategoryByNameInCloud(uid, section, existingSectionCateg
             section,
             name: category.name,
             weight: category.weight,
+            items: cloudItems,
             archived: false
         });
     }
 }
 
 async function upsertScorePayloadWithCategoryRecovery(payload, uid, sectionHint = "") {
-    const conflictOpts = { onConflict: "user_id,date,student_id,grading_period,category_id" };
+    const conflictOpts = { onConflict: "user_id,date,student_id,grading_period,category_id,item_id" };
     const firstAttempt = await supabaseClient.from("scores").upsert(payload, conflictOpts);
     if (!firstAttempt || !firstAttempt.error) return firstAttempt;
     if (!isMissingCategoryFkError(firstAttempt.error)) throw firstAttempt.error;
@@ -883,15 +989,31 @@ async function upsertScorePayloadWithCategoryRecovery(payload, uid, sectionHint 
     const rows = Array.isArray(payload) ? payload : [payload];
     const neededMap = new Map();
     rows.forEach(row => {
-        if (!row.category_id || neededMap.has(row.category_id)) return;
-        const weight = Number(row.category_weight ?? 0);
-        const section = sectionHint || resolveSectionForScoreRow(row);
-        neededMap.set(row.category_id, {
-            id: row.category_id,
-            section,
-            name: String(row.category_name || "General").trim() || "General",
-            weight: Number.isFinite(weight) ? Math.min(Math.max(weight, 0), 100) : 0
-        });
+        if (!row.category_id) return;
+        if (!neededMap.has(row.category_id)) {
+            const weight = Number(row.category_weight ?? 0);
+            const section = sectionHint || resolveSectionForScoreRow(row);
+            const localCat = state.gradeCategories.find(c => c.id === row.category_id);
+            neededMap.set(row.category_id, {
+                id: row.category_id,
+                section,
+                name: String(row.category_name || "General").trim() || "General",
+                weight: Number.isFinite(weight) ? Math.min(Math.max(weight, 0), 100) : 0,
+                items: localCat?.items
+                    ? sanitizeCategoryItems(localCat.items)
+                    : [{ id: row.item_id || newCategoryId(), label: row.item_label || "#1", max_score: Number(row.max_score) > 0 ? Number(row.max_score) : 100, period_max: {} }]
+            });
+        } else if (row.item_id) {
+            const entry = neededMap.get(row.category_id);
+            if (!entry.items.some(i => i.id === row.item_id)) {
+                entry.items.push({
+                    id: row.item_id,
+                    label: row.item_label || `#${entry.items.length + 1}`,
+                    max_score: Number(row.max_score) > 0 ? Number(row.max_score) : 100,
+                    period_max: {}
+                });
+            }
+        }
     });
 
     const timestamp = new Date().toISOString();
@@ -926,12 +1048,14 @@ async function upsertScorePayloadWithCategoryRecovery(payload, uid, sectionHint 
 
         await reconcileCategoryByNameInCloud(uid, category.section, sectionExisting, category, timestamp);
         if (!sectionExisting.some(row => row.id === category.id)) {
+            const cloudItems = categoryItemsForCloud(category.items);
             must(await supabaseClient.from("grading_categories").upsert({
                 id: category.id,
                 user_id: uid,
                 section: category.section,
                 name: category.name,
                 weight: category.weight,
+                items: cloudItems,
                 archived: false,
                 updated_at: timestamp
             }, { onConflict: "id" }));
@@ -939,7 +1063,7 @@ async function upsertScorePayloadWithCategoryRecovery(payload, uid, sectionHint 
                 [{ user_id: uid, section: category.section, category_id: category.id }],
                 { onConflict: "user_id,section,category_id" }
             ));
-            allExistingCategories.push({ ...category, user_id: uid, archived: false });
+            allExistingCategories.push({ ...category, items: cloudItems, user_id: uid, archived: false });
         }
     }
 
@@ -970,6 +1094,7 @@ async function syncGradingConfigToCloud(op, uid) {
                 section,
                 name: category.name,
                 weight: category.weight,
+                items: categoryItemsForCloud(category.items),
                 archived: false,
                 updated_at: timestamp
             })),
@@ -981,6 +1106,11 @@ async function syncGradingConfigToCloud(op, uid) {
             category_name: category.name,
             category_weight: category.weight
         }).eq("user_id", uid).eq("category_id", category.id));
+        for (const item of sanitizeCategoryItems(category.items)) {
+            must(await supabaseClient.from("scores").update({
+                item_label: item.label
+            }).eq("user_id", uid).eq("category_id", category.id).eq("item_id", item.id));
+        }
     }
     must(await supabaseClient.from("section_grading_categories").delete()
         .eq("user_id", uid).eq("section", section));
@@ -1237,6 +1367,7 @@ async function pushFullStateToCloud() {
         section: category.section,
         name: category.name,
         weight: category.weight,
+        items: categoryItemsForCloud(category.items),
         archived: false
     }));
     const activeIds = new Set(categoryRows.map(row => row.id));
@@ -1249,6 +1380,7 @@ async function pushFullStateToCloud() {
             section: resolveSectionForScoreRow(scoreRow),
             name: String(scoreRow.category_name || "General").trim() || "General",
             weight: 0,
+            items: [{ id: scoreRow.item_id || "item-1", label: scoreRow.item_label || "#1", max_score: Number(scoreRow.max_score) > 0 ? Number(scoreRow.max_score) : 100 }],
             archived: true
         });
     });
@@ -1613,30 +1745,78 @@ function getSelectedGradeCategoryIds(section) {
     return getSectionGradeCategories(section).map(category => category.id);
 }
 
-function renderScoreSheetHeader(categories, categoryMaximums) {
+function getCategoryItems(category) {
+    if (!Array.isArray(category.items) || category.items.length === 0) {
+        category.items = sanitizeCategoryItems(null, 1);
+    }
+    return category.items;
+}
+
+function itemMaximumKey(categoryId, itemId) {
+    return `${categoryId}::${itemId}`;
+}
+
+function renderScoreSheetHeader(categories, itemMaximums) {
     const tableHead = document.getElementById("score-table-head");
     if (!tableHead) return;
-    tableHead.innerHTML = `<tr>
-        <th class="score-grid-index">#</th>
-        <th class="score-grid-student">Student</th>
-        ${categories.map((category) => {
-            const maximum = categoryMaximums.get(category.id) || 100;
-            return `<th class="score-grid-category" data-category-id="${esc(category.id)}">
-                <div class="score-category-heading">
-                    <strong>${esc(category.name)}</strong>
-                    <small>${esc(category.weight)}% weight</small>
-                </div>
-                <label class="score-column-max-label">
-                    <span>Max</span>
-                    <input type="number" class="score-column-max" min="1" step="1" value="${esc(maximum)}"
-                        data-category-id="${esc(category.id)}" data-previous-value="${esc(maximum)}"
-                        aria-label="Maximum score for ${esc(category.name)}"
-                        onchange="updateScoreMaximum('${jsArg(category.id)}', this.value, this)">
-                </label>
-            </th>`;
-        }).join("")}
-        <th class="score-grid-final">Final Grade</th>
-    </tr>`;
+    if (categories.length === 0) {
+        tableHead.innerHTML = `<tr class="score-head-group-row">
+            <th class="score-grid-index">#</th>
+            <th class="score-grid-student">Student</th>
+            <th class="score-grid-final">Final Grade</th>
+        </tr>`;
+        return;
+    }
+
+    tableHead.innerHTML = `
+        <tr class="score-head-group-row">
+            <th rowspan="2" class="score-grid-index">#</th>
+            <th rowspan="2" class="score-grid-student">Student</th>
+            ${categories.map(category => {
+                const items = getCategoryItems(category);
+                return `<th colspan="${items.length}" class="score-grid-category-group" data-category-id="${esc(category.id)}">
+                    <div class="score-category-group-bar">
+                        <div class="score-category-heading">
+                            <strong>${esc(category.name)}</strong>
+                            <small>${esc(category.weight)}% weight${items.length > 1 ? ` · ${items.length} items` : ""}</small>
+                        </div>
+                        <button type="button" class="score-add-item-btn"
+                            onclick="addCategorySubsection('${jsArg(category.id)}')"
+                            title="Add subsection under ${esc(category.name)}"
+                            aria-label="Add subsection to ${esc(category.name)}">+ Add</button>
+                    </div>
+                </th>`;
+            }).join("")}
+            <th rowspan="2" class="score-grid-final">Final Grade</th>
+        </tr>
+        <tr class="score-head-item-row">
+            ${categories.flatMap(category => {
+                const items = getCategoryItems(category);
+                return items.map((item, itemIdx) => {
+                    const maximum = itemMaximums.get(itemMaximumKey(category.id, item.id)) || 100;
+                    return `<th class="score-grid-category" data-category-id="${esc(category.id)}" data-item-id="${esc(item.id)}">
+                        <div class="score-item-bar">
+                            <input type="text" class="score-item-label-input" value="${esc(item.label)}" maxlength="40"
+                                placeholder="#${itemIdx + 1}"
+                                aria-label="Subsection name for ${esc(category.name)} ${itemIdx + 1}"
+                                onchange="renameCategorySubsection('${jsArg(category.id)}', '${jsArg(item.id)}', this.value, this)">
+                            ${items.length > 1 ? `<button type="button" class="score-remove-item-btn"
+                                onclick="removeCategorySubsection('${jsArg(category.id)}', '${jsArg(item.id)}')"
+                                title="Remove ${esc(item.label)}"
+                                aria-label="Remove ${esc(item.label)} from ${esc(category.name)}">&times;</button>` : ""}
+                        </div>
+                        <label class="score-column-max-label">
+                            <span>Max</span>
+                            <input type="number" class="score-column-max" min="1" step="any" value="${esc(maximum)}"
+                                data-category-id="${esc(category.id)}" data-item-id="${esc(item.id)}" data-previous-value="${esc(maximum)}"
+                                aria-label="Maximum score for ${esc(category.name)} ${esc(item.label)}"
+                                onchange="updateScoreMaximum('${jsArg(category.id)}', '${jsArg(item.id)}', this.value, this)">
+                        </label>
+                    </th>`;
+                });
+            }).join("")}
+        </tr>
+    `;
 }
 
 function renderScoreWeightSummary(section) {
@@ -1650,15 +1830,40 @@ function renderScoreWeightSummary(section) {
     const selected = getSectionGradeCategories(section);
     const sectionTotal = Number(selected.reduce((sum, category) => sum + category.weight, 0).toFixed(2));
     summary.textContent = selected.length > 0
-        ? `${section}: ${selected.map(category => `${category.name} ${category.weight}%`).join(" · ")} | Section total: ${sectionTotal}%`
+        ? `${section}: ${selected.map(category => {
+            const count = getCategoryItems(category).length;
+            return `${category.name} ${category.weight}%${count > 1 ? ` (${count} items)` : ""}`;
+        }).join(" · ")} | Section total: ${sectionTotal}%`
         : `No grading categories set up for ${section} yet. Click Categories & Weights to configure this section.`;
     summary.classList.toggle("text-rose", selected.length > 0 && Math.abs(sectionTotal - 100) > 0.001);
 }
 
+function resolveScoreItemForCategory(category, value) {
+    const items = getCategoryItems(category);
+    if (value?.item_id) {
+        const exact = items.find(i => i.id === value.item_id);
+        if (exact) return exact;
+        if (value.item_id === "item-1" && items[0]) return items[0];
+        return null;
+    }
+    return items[0] || null;
+}
+
 function calculateStudentFinalGrade(studentId, section, gradingPeriod) {
     const categories = getSectionGradeCategories(section);
-    const totals = new Map(categories.map(category => [category.id, { score: 0, max: 0, weight: category.weight }]));
+    const totals = new Map(categories.map(category => [
+        category.id,
+        {
+            score: 0,
+            max: 0,
+            weight: category.weight,
+            itemCount: getCategoryItems(category).length,
+            scoredItemIds: new Set()
+        }
+    ]));
 
+    // Pick the latest-dated score per (category, item) within this grading period.
+    const latestByCatItem = new Map();
     Object.keys(state.scores).forEach(key => {
         const value = state.scores[key];
         const parsed = parseScoreKey(key);
@@ -1668,18 +1873,40 @@ function calculateStudentFinalGrade(studentId, section, gradingPeriod) {
         const category = categories.find(item => item.id === value.category_id)
             || categories.find(item => !value.category_id && item.name === value.category_name);
         if (!category || !totals.has(category.id)) return;
+        const matchedItem = resolveScoreItemForCategory(category, value);
+        if (!matchedItem) return;
         const score = Number(value.score);
         const maxScore = Number(value.max_score);
         if (!Number.isFinite(score) || !Number.isFinite(maxScore) || maxScore <= 0) return;
-        const total = totals.get(category.id);
-        total.score += score;
-        total.max += maxScore;
+        const mapKey = `${category.id}::${matchedItem.id}`;
+        const prev = latestByCatItem.get(mapKey);
+        const rowDate = String(value.date || parsed.date || "");
+        if (!prev || rowDate >= prev.date) {
+            latestByCatItem.set(mapKey, {
+                categoryId: category.id,
+                itemId: matchedItem.id,
+                score,
+                maxScore,
+                date: rowDate
+            });
+        }
+    });
+
+    latestByCatItem.forEach(entry => {
+        const total = totals.get(entry.categoryId);
+        total.score += entry.score;
+        total.max += entry.maxScore;
+        total.scoredItemIds.add(entry.itemId);
     });
 
     let weightedGrade = 0;
     let coveredWeight = 0;
+    let allWeightedItemsScored = true;
     const totalWeight = categories.reduce((sum, category) => sum + category.weight, 0);
     totals.forEach(total => {
+        if (total.weight > 0 && total.scoredItemIds.size < total.itemCount) {
+            allWeightedItemsScored = false;
+        }
         if (total.max <= 0) return;
         weightedGrade += (total.score / total.max) * 100 * total.weight;
         coveredWeight += total.weight;
@@ -1690,7 +1917,7 @@ function calculateStudentFinalGrade(studentId, section, gradingPeriod) {
         coveredWeight,
         totalWeight,
         weightsValid: Math.abs(totalWeight - 100) < 0.001,
-        complete: Math.abs(totalWeight - 100) < 0.001 && coveredWeight >= totalWeight - 0.001
+        complete: Math.abs(totalWeight - 100) < 0.001 && coveredWeight >= totalWeight - 0.001 && allWeightedItemsScored
     };
 }
 
@@ -1736,7 +1963,8 @@ function ensureScoreCategories() {
                 name,
                 weight: index === names.length - 1
                     ? Number((100 - baseWeight * (names.length - 1)).toFixed(2))
-                    : baseWeight
+                    : baseWeight,
+                items: sanitizeCategoryItems(null, 1)
             });
         });
     });
@@ -1760,27 +1988,69 @@ function refreshScoreCategoryMetadata(categories) {
             || categories.find(item => !value.category_id && (!studSection || item.section === studSection) && item.name === oldName);
         const categoryId = category?.id || value.category_id || null;
         const categoryName = category?.name || oldName;
-        const nextKey = makeScoreRecordKey(value.date || parsed.date, studentId, period, categoryId, categoryName);
+        const matchedItem = category ? resolveScoreItemForCategory(category, value) : null;
+        const itemId = matchedItem?.id || value.item_id || "";
+        const itemLabel = matchedItem?.label || value.item_label || "#1";
+        const nextKey = makeScoreRecordKey(value.date || parsed.date, studentId, period, categoryId, categoryName, itemId);
         nextScores[nextKey] = {
             ...value,
             student_id: studentId,
             grading_period: period,
             category_id: categoryId,
             category_name: categoryName,
-            category_weight: category?.weight ?? value.category_weight ?? 100
+            category_weight: category?.weight ?? value.category_weight ?? 100,
+            item_id: itemId || null,
+            item_label: itemLabel
         };
     });
     state.scores = nextScores;
 }
 
-// Scores keep their own category ID/name/weight and grading-period metadata.
-// The legacy subject column remains populated with the period for compatibility.
-function findScoreRecord(date, studentId, gradingPeriod, category) {
-    const key = makeScoreRecordKey(date, studentId, gradingPeriod, category.id, category.name);
-    if (state.scores[key]) return { key, value: state.scores[key] };
-    const legacyKey = makeScoreRecordKey(date, studentId, gradingPeriod, null, category.name);
-    if (state.scores[legacyKey]) return { key: legacyKey, value: state.scores[legacyKey] };
-    return { key, value: null };
+// Scores keep their own category ID/name/weight, subsection item ID/label, and
+// grading-period metadata. Searches the selected date first, then falls back to
+// the latest saved entry for that (student, gradingPeriod, category, item) so
+// previously graded subsections stay visible on the period sheet across days.
+function findScoreRecord(date, studentId, gradingPeriod, category, item = null) {
+    const items = getCategoryItems(category);
+    const targetItem = item || items[0];
+    const isFirstItem = !targetItem || targetItem.id === items[0]?.id;
+    const itemId = targetItem?.id || "";
+
+    const exactKey = makeScoreRecordKey(date, studentId, gradingPeriod, category.id, category.name, itemId);
+    if (state.scores[exactKey]) return { key: exactKey, value: state.scores[exactKey] };
+
+    if (isFirstItem) {
+        const noItemKey = makeScoreRecordKey(date, studentId, gradingPeriod, category.id, category.name, "");
+        if (state.scores[noItemKey] && (!state.scores[noItemKey].item_id || state.scores[noItemKey].item_id === "item-1")) {
+            return { key: noItemKey, value: state.scores[noItemKey] };
+        }
+        const legacyKey = makeScoreRecordKey(date, studentId, gradingPeriod, null, category.name, "");
+        if (state.scores[legacyKey]) return { key: legacyKey, value: state.scores[legacyKey] };
+    }
+
+    let bestKey = null;
+    let bestVal = null;
+    let bestDate = "";
+    Object.keys(state.scores).forEach(k => {
+        const val = state.scores[k];
+        const parsed = parseScoreKey(k);
+        if ((val.student_id || parsed.studentId) !== studentId) return;
+        const period = val.grading_period || parseLegacyScoreSubject(val.subject || parsed.subject).period;
+        if (period !== gradingPeriod) return;
+        const catMatches = val.category_id === category.id || (!val.category_id && val.category_name === category.name);
+        if (!catMatches) return;
+        const resolved = resolveScoreItemForCategory(category, val);
+        if (!resolved || resolved.id !== itemId) return;
+        const rowDate = String(val.date || parsed.date || "");
+        if (!bestVal || rowDate >= bestDate) {
+            bestKey = k;
+            bestVal = val;
+            bestDate = rowDate;
+        }
+    });
+    if (bestVal) return { key: bestKey, value: bestVal };
+
+    return { key: exactKey, value: null };
 }
 
 function loadScoreSheet() {
@@ -1792,15 +2062,25 @@ function loadScoreSheet() {
     const tableBody = document.getElementById("score-table-body");
     if (!tableBody) return;
 
-    const categoryMaximums = new Map(categories.map(category => {
-        const firstSavedScore = secStudents
-            .map(stud => findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category).value)
-            .find(Boolean);
-        const savedMaximum = Number(firstSavedScore?.max_score);
-        return [category.id, Number.isFinite(savedMaximum) && savedMaximum > 0 ? savedMaximum : 100];
-    }));
-    const columnCount = categories.length + 3;
-    renderScoreSheetHeader(categories, categoryMaximums);
+    const itemMaximums = new Map();
+    let totalItemColumns = 0;
+    categories.forEach(category => {
+        getCategoryItems(category).forEach(item => {
+            totalItemColumns++;
+            const firstSavedScore = secStudents
+                .map(stud => findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category, item).value)
+                .find(Boolean);
+            const savedMaximum = Number(firstSavedScore?.max_score);
+            const periodConfiguredMax = Number(item.period_max?.[selectedPeriod]);
+            const resolvedMax = Number.isFinite(savedMaximum) && savedMaximum > 0
+                ? savedMaximum
+                : (Number.isFinite(periodConfiguredMax) && periodConfiguredMax > 0 ? periodConfiguredMax : (Number(item.max_score) > 0 ? Number(item.max_score) : 100));
+            itemMaximums.set(itemMaximumKey(category.id, item.id), resolvedMax);
+        });
+    });
+
+    const columnCount = totalItemColumns + 3;
+    renderScoreSheetHeader(categories, itemMaximums);
     renderScoreWeightSummary(selectedSec);
 
     const periodLabel = selectedPeriod === "General" ? "Unassigned" : selectedPeriod;
@@ -1809,7 +2089,7 @@ function loadScoreSheet() {
     if (badge) badge.textContent = periodLabel;
     if (subtitle) {
         subtitle.textContent = selectedSec
-            ? `${selectedDate || "No date"} · ${periodLabel} · ${selectedSec} · ${categories.length} assessment column${categories.length === 1 ? "" : "s"}`
+            ? `${selectedDate || "No date"} · ${periodLabel} · ${selectedSec} · ${totalItemColumns} assessment column${totalItemColumns === 1 ? "" : "s"}`
             : "Record student scores for the selected date and section";
     }
 
@@ -1836,23 +2116,27 @@ function loadScoreSheet() {
         tr.innerHTML = `
             <td class="score-grid-index">${idx + 1}</td>
             <td class="score-grid-student"><strong>${esc(stud.name)}</strong><small>${esc(stud.student_id)}</small></td>
-            ${categories.map(category => {
-                const record = findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category);
-                const currentScore = record.value;
-                const currentMaxValue = Number(currentScore?.max_score);
-                const currentMaximum = Number.isFinite(currentMaxValue) && currentMaxValue > 0
-                    ? currentMaxValue
-                    : categoryMaximums.get(category.id);
-                return `<td class="score-grid-cell">
-                    <input type="number" class="score-input" min="0" max="${esc(currentMaximum)}" step="any"
-                        value="${currentScore ? esc(currentScore.score) : ""}" placeholder="—"
-                        title="${esc(category.name)}: enter 0 to ${esc(currentMaximum)}"
-                        aria-label="${esc(category.name)} score for ${esc(stud.name)}"
-                        data-key="${esc(record.key)}" data-category-id="${esc(category.id)}"
-                        data-max-score="${esc(currentMaximum)}"
-                        onkeydown="if (event.key === 'Enter') this.blur();"
-                        onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', '${jsArg(category.id)}', this.value, this.dataset.maxScore)">
-                </td>`;
+            ${categories.flatMap(category => {
+                const items = getCategoryItems(category);
+                return items.map(item => {
+                    const record = findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category, item);
+                    const currentScore = record.value;
+                    const currentMaxValue = Number(currentScore?.max_score);
+                    const currentMaximum = Number.isFinite(currentMaxValue) && currentMaxValue > 0
+                        ? currentMaxValue
+                        : itemMaximums.get(itemMaximumKey(category.id, item.id));
+                    const titleLabel = items.length > 1 ? `${category.name} (${item.label})` : category.name;
+                    return `<td class="score-grid-cell">
+                        <input type="number" class="score-input" min="0" max="${esc(currentMaximum)}" step="any"
+                            value="${currentScore ? esc(currentScore.score) : ""}" placeholder="—"
+                            title="${esc(titleLabel)}: enter 0 to ${esc(currentMaximum)}"
+                            aria-label="${esc(titleLabel)} score for ${esc(stud.name)}"
+                            data-key="${esc(record.key)}" data-category-id="${esc(category.id)}"
+                            data-item-id="${esc(item.id)}" data-max-score="${esc(currentMaximum)}"
+                            onkeydown="if (event.key === 'Enter') this.blur();"
+                            onchange="setStudentScore('${jsArg(selectedDate)}', '${jsArg(stud.student_id)}', '${jsArg(selectedPeriod)}', '${jsArg(category.id)}', '${jsArg(item.id)}', this.value, this.dataset.maxScore)">
+                    </td>`;
+                });
             }).join("")}
             <td class="text-center score-grid-final final-grade-cell" data-student-id="${esc(stud.student_id)}">${finalGradeMarkup(stud.student_id, selectedSec, selectedPeriod)}</td>
         `;
@@ -1870,7 +2154,89 @@ async function setStudentStatus(date, studentId, status) {
     await trySync({ t: "att", date, student_id: studentId, status });
 }
 
-async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
+async function syncSectionCategoriesConfig(section) {
+    if (!section || !cloudReady()) return true;
+    const sectionCategories = getSectionGradeCategories(section);
+    return trySync({
+        t: "gradingConfig",
+        section,
+        categories: sectionCategories,
+        selectedIds: sectionCategories.map(c => c.id)
+    });
+}
+
+async function addCategorySubsection(categoryId) {
+    const category = state.gradeCategories.find(item => item.id === categoryId);
+    if (!category) return false;
+    const items = getCategoryItems(category);
+    if (items.length >= 30) {
+        showToast("A category can have up to 30 subsections.", "error");
+        return false;
+    }
+    const newItem = {
+        id: newCategoryId(),
+        label: `#${items.length + 1}`,
+        max_score: 100,
+        period_max: {}
+    };
+    items.push(newItem);
+    localMutationSeq++;
+    saveLocalStore();
+    loadScoreSheet();
+    await syncSectionCategoriesConfig(category.section);
+    showToast(`Added ${category.name} ${newItem.label}.`, "success");
+    return true;
+}
+
+async function removeCategorySubsection(categoryId, itemId) {
+    const category = state.gradeCategories.find(item => item.id === categoryId);
+    if (!category) return false;
+    const items = getCategoryItems(category);
+    if (items.length <= 1) {
+        showToast("Each category keeps at least one subsection.", "error");
+        return false;
+    }
+    const idx = items.findIndex(i => i.id === itemId);
+    if (idx === -1) return false;
+    const removed = items[idx];
+    items.splice(idx, 1);
+    items.forEach((item, index) => {
+        if (/^#\d+$/.test(item.label)) item.label = `#${index + 1}`;
+    });
+    refreshScoreCategoryMetadata(state.gradeCategories);
+    localMutationSeq++;
+    saveLocalStore();
+    loadScoreSheet();
+    await syncSectionCategoriesConfig(category.section);
+    showToast(`Removed ${category.name} ${removed.label}.`, "success");
+    return true;
+}
+
+async function renameCategorySubsection(categoryId, itemId, newLabel, inputEl) {
+    const category = state.gradeCategories.find(item => item.id === categoryId);
+    if (!category) return false;
+    const items = getCategoryItems(category);
+    const idx = items.findIndex(i => i.id === itemId);
+    if (idx === -1) return false;
+    const cleaned = String(newLabel || "").trim().slice(0, 40) || `#${idx + 1}`;
+    items[idx].label = cleaned;
+    if (inputEl) inputEl.value = cleaned;
+    refreshScoreCategoryMetadata(state.gradeCategories);
+    localMutationSeq++;
+    saveLocalStore();
+    await syncSectionCategoriesConfig(category.section);
+    return true;
+}
+
+async function updateScoreMaximum(categoryId, itemIdOrMax, maxOrInput, maybeInput) {
+    let itemId = itemIdOrMax;
+    let maxScoreValue = maxOrInput;
+    let maxInput = maybeInput;
+    if (maybeInput === undefined && maxOrInput && typeof maxOrInput === "object") {
+        itemId = "";
+        maxScoreValue = itemIdOrMax;
+        maxInput = maxOrInput;
+    }
     if (!maxInput) return false;
 
     const previousMaximum = Number(maxInput.dataset.previousValue) || 100;
@@ -1885,7 +2251,10 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
     const sec = document.getElementById("score-section")?.value || "";
     const gradingPeriod = document.getElementById("score-period")?.value || "General";
     const category = state.gradeCategories.find(item => item.id === categoryId);
-    if (!isValidDateStr(date) || !sec || !category) {
+    const targetItem = category
+        ? (getCategoryItems(category).find(i => i.id === (itemId || maxInput.dataset.itemId)) || getCategoryItems(category)[0])
+        : null;
+    if (!isValidDateStr(date) || !sec || !category || !targetItem) {
         maxInput.value = String(previousMaximum);
         showToast("Select a valid date, section and category first.", "error");
         return false;
@@ -1893,7 +2262,7 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
 
     const secStudents = state.students.filter(s => s.section === sec);
     const savedRecords = secStudents.map(stud => {
-        const record = findScoreRecord(date, stud.student_id, gradingPeriod, category);
+        const record = findScoreRecord(date, stud.student_id, gradingPeriod, category, targetItem);
         return { ...record, studentId: stud.student_id };
     }).filter(record => record.value);
 
@@ -1907,52 +2276,69 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
         return false;
     }
 
+    if (!targetItem.period_max || typeof targetItem.period_max !== "object") {
+        targetItem.period_max = {};
+    }
+    targetItem.period_max[gradingPeriod] = maxScore;
+
     maxInput.value = String(maxScore);
     maxInput.dataset.previousValue = String(maxScore);
     document.querySelectorAll("#score-table-body .score-input").forEach(input => {
-        if (input.dataset.categoryId !== categoryId) return;
+        if (input.dataset.categoryId !== categoryId || input.dataset.itemId !== targetItem.id) return;
         input.max = String(maxScore);
         input.dataset.maxScore = String(maxScore);
-        input.title = `${category.name}: enter 0 to ${maxScore}`;
+        input.title = `${category.name} (${targetItem.label}): enter 0 to ${maxScore}`;
     });
 
+    localMutationSeq++;
     if (savedRecords.length > 0) {
+        const rows = [];
         savedRecords.forEach(record => {
-            if (record.key !== makeScoreRecordKey(date, record.studentId, gradingPeriod, category.id, category.name)) {
+            const recordDate = record.value.date || date;
+            const nextKey = makeScoreRecordKey(recordDate, record.studentId, gradingPeriod, category.id, category.name, targetItem.id);
+            if (record.key !== nextKey) {
                 delete state.scores[record.key];
             }
-            const key = makeScoreRecordKey(date, record.studentId, gradingPeriod, category.id, category.name);
-            state.scores[key] = {
+            state.scores[nextKey] = {
                 ...record.value,
-                date,
+                date: recordDate,
                 student_id: record.studentId,
                 subject: gradingPeriod,
                 grading_period: gradingPeriod,
                 category_id: category.id,
                 category_name: category.name,
                 category_weight: category.weight,
+                item_id: targetItem.id,
+                item_label: targetItem.label,
                 max_score: maxScore
             };
-            record.key = key;
-        });
-        localMutationSeq++;
-        saveLocalStore();
-        updateFinalGradeCells();
-
-        if (cloudReady()) {
-            const rows = savedRecords.map(record => ({
-                date,
+            record.key = nextKey;
+            rows.push({
+                date: recordDate,
                 section: category.section || sec,
                 student_id: record.studentId,
                 grading_period: gradingPeriod,
                 category_id: category.id,
                 category_name: category.name,
                 category_weight: category.weight,
+                item_id: targetItem.id,
+                item_label: targetItem.label,
                 score: Number(record.value.score),
                 max_score: maxScore
-            }));
+            });
+        });
+        saveLocalStore();
+        updateFinalGradeCells();
+
+        if (cloudReady()) {
+            await syncSectionCategoriesConfig(category.section || sec);
             const synced = await trySync({ t: "scrB", section: category.section || sec, rows });
             if (!synced) return false;
+        }
+    } else {
+        saveLocalStore();
+        if (cloudReady()) {
+            await syncSectionCategoriesConfig(category.section || sec);
         }
     }
 
@@ -1962,9 +2348,20 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
     return true;
 }
 
-async function setStudentScore(date, studentId, gradingPeriod, categoryId, scoreValue, maxScoreValue = 100) {
+async function setStudentScore(date, studentId, gradingPeriod, categoryId, itemIdOrScore, scoreOrMax = 100, maybeMax) {
+    let itemId = itemIdOrScore;
+    let scoreValue = scoreOrMax;
+    let maxScoreValue = maybeMax ?? 100;
     const category = state.gradeCategories.find(item => item.id === categoryId);
-    if (!isValidDateStr(date) || !studentId || !gradingPeriod || !category) return false;
+    if (!category) return false;
+    const items = getCategoryItems(category);
+    if (maybeMax === undefined && !items.some(i => i.id === itemIdOrScore)) {
+        itemId = items[0]?.id || "";
+        scoreValue = itemIdOrScore;
+        maxScoreValue = scoreOrMax;
+    }
+    const targetItem = items.find(i => i.id === itemId) || items[0];
+    if (!isValidDateStr(date) || !studentId || !gradingPeriod || !targetItem) return false;
     if (String(scoreValue ?? "").trim() === "") return false;
 
     const score = Number(scoreValue);
@@ -1979,17 +2376,24 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, score
         return false;
     }
 
-    const key = makeScoreRecordKey(date, studentId, gradingPeriod, category.id, category.name);
+    const existing = findScoreRecord(date, studentId, gradingPeriod, category, targetItem);
+    const recordDate = existing.value?.date || date;
+    const key = makeScoreRecordKey(recordDate, studentId, gradingPeriod, category.id, category.name, targetItem.id);
+    if (existing.value && existing.key !== key) {
+        delete state.scores[existing.key];
+    }
     state.scores[key] = {
         score,
         max_score: maxScore,
-        date,
+        date: recordDate,
         student_id: studentId,
         subject: gradingPeriod,
         grading_period: gradingPeriod,
         category_id: category.id,
         category_name: category.name,
-        category_weight: category.weight
+        category_weight: category.weight,
+        item_id: targetItem.id,
+        item_label: targetItem.label
     };
     localMutationSeq++;
     saveLocalStore();
@@ -1998,26 +2402,31 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, score
     if (cloudReady()) {
         const synced = await trySync({
             t: "scr",
-            date,
+            date: recordDate,
             section: category.section,
             student_id: studentId,
             grading_period: gradingPeriod,
             category_id: category.id,
             category_name: category.name,
             category_weight: category.weight,
+            item_id: targetItem.id,
+            item_label: targetItem.label,
             score,
             max_score: maxScore
         });
         if (!synced) return false;
     }
 
-    showToast(`${category.name} score saved: ${score}/${maxScore}`, "success");
+    const labelSuffix = items.length > 1 ? ` (${targetItem.label})` : "";
+    showToast(`${category.name}${labelSuffix} score saved: ${score}/${maxScore}`, "success");
     return true;
 }
 
 function gradingCategoryRowMarkup(category) {
+    const itemCount = Array.isArray(category.items) && category.items.length > 0 ? category.items.length : 1;
     return `<div class="grading-weight-row" data-category-id="${esc(category.id)}">
         <input type="text" class="form-control grading-category-name" value="${esc(category.name)}" maxlength="60" placeholder="e.g. Written Work" aria-label="Category name">
+        <input type="number" class="form-control grading-category-items" min="1" max="30" step="1" value="${esc(itemCount)}" aria-label="Subsections for ${esc(category.name || "category")}" title="Number of subsections / graded items">
         <div class="grading-weight-input">
             <input type="number" class="form-control grading-category-weight" min="0" max="100" step="0.01" value="${esc(category.weight)}" aria-label="Weight for ${esc(category.name || "category")}" oninput="updateGradingTotals()">
             <span>%</span>
@@ -2034,6 +2443,8 @@ function removeGradingCategoryRow(button) {
     if (allRows.length <= 1) {
         row.dataset.categoryId = newCategoryId();
         row.querySelector(".grading-category-name").value = "";
+        const itemsEl = row.querySelector(".grading-category-items");
+        if (itemsEl) itemsEl.value = "1";
         row.querySelector(".grading-category-weight").value = "100";
     } else {
         row.remove();
@@ -2076,7 +2487,7 @@ function openGradingSetup() {
     const rows = document.getElementById("grading-weight-rows");
     rows.innerHTML = sectionCategories.length > 0
         ? sectionCategories.map(category => gradingCategoryRowMarkup(category)).join("")
-        : gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 100 });
+        : gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 100, items: sanitizeCategoryItems(null, 1) });
     setGradingSetupError();
     updateGradingTotals();
     openModal("modal-grading-setup");
@@ -2086,7 +2497,7 @@ function addGradingCategoryRow() {
     const section = document.getElementById("score-section")?.value || "";
     const rows = document.getElementById("grading-weight-rows");
     const wrapper = document.createElement("div");
-    wrapper.innerHTML = gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 0 });
+    wrapper.innerHTML = gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 0, items: sanitizeCategoryItems(null, 1) });
     const row = wrapper.firstElementChild;
     rows.appendChild(row);
     updateGradingTotals();
@@ -2107,6 +2518,7 @@ async function saveGradingSetup(event) {
     for (const row of rowElements) {
         const id = row.dataset.categoryId;
         const name = row.querySelector(".grading-category-name").value.trim();
+        const itemCountRaw = Number(row.querySelector(".grading-category-items")?.value ?? 1);
         const weight = Number(row.querySelector(".grading-category-weight").value);
         const nameKey = name.toLowerCase();
         if (!name || name.length > 60) {
@@ -2117,12 +2529,27 @@ async function saveGradingSetup(event) {
             setGradingSetupError(`Category names in ${section} must be unique: ${name}.`);
             return;
         }
+        if (!Number.isInteger(itemCountRaw) || itemCountRaw < 1 || itemCountRaw > 30) {
+            setGradingSetupError(`Enter 1 to 30 subsections for ${name}.`);
+            return;
+        }
         if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
             setGradingSetupError(`Enter a weight from 0 to 100 for ${name}.`);
             return;
         }
+        const existingCategory = state.gradeCategories.find(c => c.id === id);
+        const existingItems = existingCategory ? sanitizeCategoryItems(existingCategory.items) : [];
+        const items = existingItems.slice(0, itemCountRaw);
+        while (items.length < itemCountRaw) {
+            items.push({
+                id: newCategoryId(),
+                label: `#${items.length + 1}`,
+                max_score: 100,
+                period_max: {}
+            });
+        }
         names.add(nameKey);
-        categories.push({ id, section, name, weight });
+        categories.push({ id, section, name, weight, items });
     }
 
     const sectionTotal = categories.reduce((sum, category) => sum + category.weight, 0);
