@@ -1514,13 +1514,26 @@ body.auth-pending {
     top: 0;
     z-index: 7;
     height: auto;
-    min-height: 76px;
-    padding: 9px 10px;
+    padding: 7px 8px;
     background: var(--border-light);
     vertical-align: middle;
 }
 
-.score-spreadsheet tr > *:last-child { border-right: 0; }
+.score-spreadsheet thead tr.score-head-group-row th.score-grid-category-group {
+    height: 46px;
+    min-height: 46px;
+    padding: 6px 10px;
+    background: #eef2ff;
+}
+
+.score-spreadsheet thead tr.score-head-item-row th {
+    top: 46px;
+    min-height: 62px;
+    padding: 6px 8px;
+    background: var(--border-light);
+}
+
+.score-spreadsheet tr:not(.score-head-item-row) > *:last-child { border-right: 0; }
 .score-spreadsheet tbody tr:last-child > * { border-bottom: 0; }
 .score-spreadsheet tbody tr:hover td { background: var(--bg-row-hover); }
 
@@ -1559,37 +1572,130 @@ td.score-grid-student { padding: 8px 12px; }
 .score-spreadsheet thead .score-grid-index,
 .score-spreadsheet thead .score-grid-student { z-index: 9; }
 
-.score-grid-category {
-    width: 142px;
-    min-width: 142px;
-    max-width: 142px;
+.score-grid-category-group {
     text-align: center;
 }
 
+.score-category-group-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.score-add-item-btn {
+    flex-shrink: 0;
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid rgba(79, 70, 229, 0.28);
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.score-add-item-btn:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.score-grid-category {
+    width: 118px;
+    min-width: 118px;
+    max-width: 118px;
+    text-align: center;
+}
+
+.score-category-heading { min-width: 0; }
 .score-category-heading strong,
 .score-category-heading small { display: block; }
 .score-category-heading strong {
     color: var(--text-main);
-    font-size: 12px;
-    line-height: 1.3;
+    font-size: 11.5px;
+    line-height: 1.25;
     overflow-wrap: anywhere;
     text-transform: none;
     letter-spacing: 0;
 }
 .score-category-heading small {
-    margin-top: 2px;
+    margin-top: 1px;
     color: var(--text-muted);
-    font-size: 9px;
+    font-size: 9.5px;
     text-transform: none;
     letter-spacing: 0;
+}
+
+.score-item-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.score-item-label-input {
+    width: 100%;
+    min-width: 0;
+    height: 22px;
+    padding: 1px 4px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.score-item-label-input:hover {
+    border-color: var(--border-color);
+    background: var(--bg-card);
+}
+
+.score-item-label-input:focus {
+    outline: 2px solid var(--blue-text);
+    outline-offset: 0;
+    border-color: var(--blue-text);
+    background: var(--bg-card);
+}
+
+.score-remove-item-btn {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.score-remove-item-btn:hover {
+    border-color: var(--rose-border);
+    background: var(--rose-bg);
+    color: var(--rose-text);
 }
 
 .score-column-max-label {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 5px;
+    margin-top: 5px;
     color: var(--text-muted);
     font-size: 10px;
     text-transform: none;
@@ -1597,9 +1703,9 @@ td.score-grid-student { padding: 8px 12px; }
 }
 
 .score-column-max {
-    width: 66px;
-    height: 28px;
-    padding: 3px 5px;
+    width: 58px;
+    height: 26px;
+    padding: 2px 4px;
     border: 1px solid var(--border-color);
     border-radius: 5px;
     background: var(--bg-card);
@@ -1617,9 +1723,9 @@ td.score-grid-student { padding: 8px 12px; }
 }
 
 .score-grid-cell {
-    width: 142px;
-    min-width: 142px;
-    max-width: 142px;
+    width: 118px;
+    min-width: 118px;
+    max-width: 118px;
     padding: 0 !important;
     text-align: center;
 }
@@ -1658,7 +1764,7 @@ td.score-grid-student { padding: 8px 12px; }
     .score-spreadsheet-wrap { max-height: 62vh; }
     .score-grid-student { width: 150px; min-width: 150px; max-width: 150px; }
     .score-grid-category,
-    .score-grid-cell { width: 124px; min-width: 124px; max-width: 124px; }
+    .score-grid-cell { width: 108px; min-width: 108px; max-width: 108px; }
     .score-grid-final { width: 134px; min-width: 134px; max-width: 134px; }
     .score-spreadsheet tbody .score-grid-final { position: static; box-shadow: none; }
     .score-spreadsheet thead .score-grid-final { right: auto; box-shadow: none; }
@@ -1714,14 +1820,22 @@ td.score-grid-student { padding: 8px 12px; }
 .final-grade-cell .final-grade-running { color: var(--amber-text); }
 .final-grade-empty { color: var(--text-muted); font-size: 18px; }
 
-.grading-setup-modal { max-width: 650px; }
+.grading-setup-modal { max-width: 680px; }
 .grading-weight-rows { display: flex; flex-direction: column; gap: 10px; }
 .grading-weight-head,
 .grading-weight-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 118px 36px;
+    grid-template-columns: minmax(0, 1fr) 86px 112px 36px;
     align-items: center;
     gap: 10px;
+}
+
+@media (max-width: 480px) {
+    .grading-weight-head,
+    .grading-weight-row {
+        grid-template-columns: minmax(0, 1fr) 68px 92px 34px;
+        gap: 6px;
+    }
 }
 
 .grading-weight-head {
@@ -1733,7 +1847,9 @@ td.score-grid-student { padding: 8px 12px; }
     text-transform: uppercase;
 }
 
-.grading-weight-head span:nth-child(2) { text-align: center; }
+.grading-weight-head span:nth-child(2),
+.grading-weight-head span:nth-child(3) { text-align: center; }
+.grading-category-items { text-align: center; padding-left: 6px; padding-right: 6px; }
 .grading-category-name { min-width: 0; }
 .grading-category-remove {
     width: 36px;

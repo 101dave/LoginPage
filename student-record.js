@@ -219,11 +219,19 @@
             scoreEmpty.classList.add("hidden");
             scoreBody.innerHTML = scores.map((row) => {
                 const pct = row.pct != null ? `${row.pct}%` : "—";
+                const multiInCategory = scores.filter((s) =>
+                    (row.category_id && s.category_id === row.category_id
+                        || (!row.category_id && (s.category_name || "General") === (row.category_name || "General")))
+                    && (s.grading_period || s.subject || "General") === (row.grading_period || row.subject || "General")
+                ).length > 1;
+                const itemLabel = String(row.item_label || "").trim();
+                const showItem = itemLabel && (itemLabel !== "#1" || multiInCategory);
+                const itemSuffix = showItem ? ` · ${escapeHtml(itemLabel)}` : "";
                 return `
                     <tr>
                         <td>${escapeHtml(formatDate(row.date))}</td>
                         <td>${escapeHtml(row.grading_period || row.subject || "General")}</td>
-                        <td>${escapeHtml(row.category_name || "General")}${row.category_weight != null ? ` (${escapeHtml(String(row.category_weight))}%)` : ""}</td>
+                        <td>${escapeHtml(row.category_name || "General")}${itemSuffix}${row.category_weight != null ? ` (${escapeHtml(String(row.category_weight))}%)` : ""}</td>
                         <td class="text-right font-mono">${escapeHtml(String(row.score))} / ${escapeHtml(String(row.max_score))}</td>
                         <td class="text-center"><span class="badge badge-score">${escapeHtml(pct)}</span></td>
                     </tr>

@@ -29,9 +29,12 @@ function click(window, element) {
     element.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 }
 
-function setGradingRow(row, name, weight) {
+function setGradingRow(row, name, weight, itemsCount) {
     row.querySelector(".grading-category-name").value = name;
     row.querySelector(".grading-category-weight").value = String(weight);
+    if (typeof itemsCount === "number") {
+        row.querySelector(".grading-category-items").value = String(itemsCount);
+    }
 }
 
 test("dashboard renders totals, present/absent counts and section breakdown", async (t) => {
@@ -213,8 +216,10 @@ test("student scores: custom maximum and grading period save separately from att
     assert.equal(savedScore.category_name, "Written Work");
     assert.equal(savedScore.category_weight, 100);
     assert.equal(savedScore.category_id, db.grading_categories[0].id);
+    assert.equal(savedScore.item_id, db.grading_categories[0].items[0].id);
+    assert.equal(savedScore.item_label, "#1");
     const scoreCall = client.calls.find((c) => c.table === "scores" && c.op === "upsert" && c.payload.score === 40);
-    assert.equal(scoreCall.options.onConflict, "user_id,date,student_id,grading_period,category_id");
+    assert.equal(scoreCall.options.onConflict, "user_id,date,student_id,grading_period,category_id,item_id");
 
     periodSelect.value = "Semester 1";
     window.loadScoreSheet();
@@ -884,6 +889,148 @@ test("removing a scored category archives it safely and section rename preserves
     document.getElementById("score-section").value = "Grade 11 - STEM A";
     window.loadScoreSheet();
     assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 2, "renamed section keeps its categories");
+});
+
+test("student scores: categories support multiple subsections (e.g. 6 Written Works, Quizzes, Performance Tasks) with independent Max scores", async (t) => {
+    const { window, db, dom } = await bootMainApp({ clientOptions: { enforceGradingConstraints: true } });
+    t.after(() => dom.window.close());
+    const document = window.document;
+    const date = todayStr();
+
+    window.switchTab("scores");
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false);
+    await sleep(30);
+    document.getElementById("score-period").value = "Quarter 1";
+
+    // Configure Grade 11 - STEM with:
+    // - Written Work (6 subsections, 30% weight)
+    // - Quiz (2 subsections, 20% weight)
+    // - Performance Task (2 subsections, 50% weight)
+    window.openGradingSetup();
+    let rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[0], "Written Work", 30, 6);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[1], "Quiz", 20, 2);
+    click(window, document.getElementById("add-grade-category-btn"));
+    rows = [...document.querySelectorAll("#grading-weight-rows .grading-weight-row")];
+    setGradingRow(rows[2], "Performance Task", 50, 2);
+
+    const form = document.getElementById("form-grading-setup");
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.filter(c => c.section === "Grade 11 - STEM" && !c.archived).length === 3);
+
+    const wwCat = db.grading_categories.find(c => c.section === "Grade 11 - STEM" && c.name === "Written Work");
+    const quizCat = db.grading_categories.find(c => c.section === "Grade 11 - STEM" && c.name === "Quiz");
+    const ptCat = db.grading_categories.find(c => c.section === "Grade 11 - STEM" && c.name === "Performance Task");
+    assert.equal(wwCat.items.length, 6, "Written Work created with 6 subsections");
+    assert.equal(quizCat.items.length, 2, "Quiz created with 2 subsections");
+    assert.equal(ptCat.items.length, 2, "Performance Task created with 2 subsections");
+
+    // Grouped header spans match subsection counts (6 + 2 + 2 = 10 total item columns)
+    const groupHeaders = [...document.querySelectorAll("#score-table-head .score-grid-category-group")];
+    assert.equal(groupHeaders.length, 3);
+    assert.equal(groupHeaders[0].getAttribute("colspan"), "6");
+    assert.equal(groupHeaders[1].getAttribute("colspan"), "2");
+    assert.equal(groupHeaders[2].getAttribute("colspan"), "2");
+    assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 10);
+    assert.match(
+        document.getElementById("score-weight-summary").textContent,
+        /Written Work 30% \(6 items\) · Quiz 20% \(2 items\) · Performance Task 50% \(2 items\)/
+    );
+
+    // Add a 3rd Quiz subsection directly from the spreadsheet header (+ Add), then remove it (×)
+    const addQuizBtn = groupHeaders[1].querySelector(".score-add-item-btn");
+    click(window, addQuizBtn);
+    await waitFor(() => db.grading_categories.find(c => c.id === quizCat.id).items.length === 3);
+    assert.equal(document.querySelectorAll(`#score-table-head .score-grid-category[data-category-id="${quizCat.id}"]`).length, 3);
+
+    const quizItemHeaders = [...document.querySelectorAll(`#score-table-head .score-grid-category[data-category-id="${quizCat.id}"]`)];
+    click(window, quizItemHeaders[2].querySelector(".score-remove-item-btn"));
+    await waitFor(() => db.grading_categories.find(c => c.id === quizCat.id).items.length === 2);
+    assert.equal(document.querySelectorAll(`#score-table-head .score-grid-category[data-category-id="${quizCat.id}"]`).length, 2);
+
+    // Rename Written Work #1 -> "WW 1" inline in the spreadsheet header
+    const ww1Header = document.querySelector(`#score-table-head .score-grid-category[data-category-id="${wwCat.id}"]`);
+    const ww1LabelInput = ww1Header.querySelector(".score-item-label-input");
+    ww1LabelInput.value = "WW 1";
+    ww1LabelInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.grading_categories.find(c => c.id === wwCat.id).items[0].label === "WW 1");
+
+    // Set distinct non-100 Max scores on each of the 6 Written Works: 15, 20, 25, 30, 50, 100 (sum = 240)
+    const wwMaxes = [15, 20, 25, 30, 50, 100];
+    const wwScores = [12, 18, 20, 27, 45, 94]; // sum = 216 -> 216 / 240 = 90.00%
+    const wwMaxInputs = [...document.querySelectorAll(`#score-table-head .score-column-max[data-category-id="${wwCat.id}"]`)];
+    assert.equal(wwMaxInputs.length, 6);
+    for (let i = 0; i < 6; i++) {
+        wwMaxInputs[i].value = String(wwMaxes[i]);
+        wwMaxInputs[i].dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+
+    // Enter Juan Dela Cruz's scores for the first 5 Written Works -> still Running (not all 6 items scored yet)
+    const firstRowWwInputs = [...document.querySelectorAll(`#score-table-body tr:first-child .score-input[data-category-id="${wwCat.id}"]`)];
+    assert.equal(firstRowWwInputs.length, 6);
+    for (let i = 0; i < 5; i++) {
+        assert.equal(firstRowWwInputs[i].max, String(wwMaxes[i]));
+        firstRowWwInputs[i].value = String(wwScores[i]);
+        firstRowWwInputs[i].dispatchEvent(new window.Event("change", { bubbles: true }));
+    }
+    await waitFor(() => db.scores.filter(s => s.category_id === wwCat.id && s.student_id === "2026-0001").length === 5);
+
+    // Enter the 6th Written Work score -> Written Work is now 216/240 = 90.00%, Running · 30% weighted
+    firstRowWwInputs[5].value = String(wwScores[5]);
+    firstRowWwInputs[5].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.filter(s => s.category_id === wwCat.id && s.student_id === "2026-0001").length === 6);
+    assert.equal(db.scores.find(s => s.category_id === wwCat.id && s.score === 12).item_label, "WW 1");
+
+    let finalCell = document.querySelector("#score-table-body tr:first-child .final-grade-cell");
+    assert.match(finalCell.textContent, /90\.00%/);
+    assert.match(finalCell.textContent, /Running · 30% weighted/);
+
+    // Switch calendar date forward (e.g. next class meeting) within Quarter 1:
+    // previously graded Written Works stay visible on the Quarter 1 sheet!
+    document.getElementById("score-date").value = "2026-10-26";
+    window.loadScoreSheet();
+    const restoredWwInputs = [...document.querySelectorAll(`#score-table-body tr:first-child .score-input[data-category-id="${wwCat.id}"]`)];
+    assert.deepEqual(restoredWwInputs.map(el => el.value), wwScores.map(String), "scores from earlier dates in the quarter stay visible");
+
+    // Grade Quiz subsections (15/20 + 25/30 = 40/50 = 80.00% * 20% weight) and Performance Task subsections (36/40 + 54/60 = 90/100 = 90.00% * 50% weight)
+    const quizMaxInputs = [...document.querySelectorAll(`#score-table-head .score-column-max[data-category-id="${quizCat.id}"]`)];
+    quizMaxInputs[0].value = "20";
+    quizMaxInputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    quizMaxInputs[1].value = "30";
+    quizMaxInputs[1].dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    const firstRowQuizInputs = [...document.querySelectorAll(`#score-table-body tr:first-child .score-input[data-category-id="${quizCat.id}"]`)];
+    firstRowQuizInputs[0].value = "15";
+    firstRowQuizInputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    firstRowQuizInputs[1].value = "25";
+    firstRowQuizInputs[1].dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    const ptMaxInputs = [...document.querySelectorAll(`#score-table-head .score-column-max[data-category-id="${ptCat.id}"]`)];
+    ptMaxInputs[0].value = "40";
+    ptMaxInputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    ptMaxInputs[1].value = "60";
+    ptMaxInputs[1].dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    const firstRowPtInputs = [...document.querySelectorAll(`#score-table-body tr:first-child .score-input[data-category-id="${ptCat.id}"]`)];
+    firstRowPtInputs[0].value = "36";
+    firstRowPtInputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    // Before last PT subsection is entered, status is still Running even though all 3 categories have >=1 score!
+    await waitFor(() => db.scores.filter(s => s.student_id === "2026-0001").length === 9);
+    finalCell = document.querySelector("#score-table-body tr:first-child .final-grade-cell");
+    assert.match(finalCell.textContent, /Running/, "final grade remains Running until every subsection in weighted categories is scored");
+
+    firstRowPtInputs[1].value = "54";
+    firstRowPtInputs[1].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.filter(s => s.student_id === "2026-0001").length === 10);
+
+    // Weighted Final Grade: 90% * 0.30 + 80% * 0.20 + 90% * 0.50 = 27 + 16 + 45 = 88.00% Final
+    finalCell = document.querySelector("#score-table-body tr:first-child .final-grade-cell");
+    assert.match(finalCell.textContent, /88\.00%/);
+    assert.match(finalCell.textContent, /Final/);
+    assert.equal(db.scores.filter(s => s.student_id === "2026-0001" && s.date === date).length, 6, "earlier-date scores kept their original date");
+    assert.equal(db.scores.filter(s => s.student_id === "2026-0001" && s.date === "2026-10-26").length, 4, "newly entered subsections stamped with current date");
 });
 
 
