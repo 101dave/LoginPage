@@ -85,6 +85,23 @@ see [Student record access](#student-record-access-record-codes)) plus
 scores carry grading-period, category, and subsection metadata and
 `grading_categories` store per-section categories and their subsections.
 
+Grading *periods* (terms for DepEd, semesters for college) need
+`supabase/migrations/20261025_section_grading_schemes.sql`; see
+[Grading schemes](#grading-schemes-high-school-and-college). Sections without a
+row in that table keep the legacy Quarter/Semester list, so this one is optional
+until a teacher actually picks a preset.
+
+Two migrations harden data that earlier builds wrote:
+
+| Migration | Closes |
+| --- | --- |
+| `20261025_attendance_status_and_student_id_constraints.sql` | `attendance.status` had no domain, so `''` or `'HACKED'` could be stored and counted as "recorded" — dragging the attendance rate down silently. Adds the `CHECK` (`NOT VALID`, validated automatically when no bad rows exist) and the `students (user_id, student_id)` unique index. |
+| `20261025_hot_path_indexes.sql` | Indexes for the query shapes the app issues, including `students (user_id, lower(student_id))` — without it every check-in scans the teacher's whole roster. |
+
+Deploy order for these: **run the SQL first, then publish the client.** The
+constraints only reject rows the new client never sends; an old client cached in
+a service worker could still try.
+
 ## Backend
 
 - Supabase project settings live in `.env` and are mirrored in `script.js`, `main.js`
@@ -175,6 +192,40 @@ The app is plain static files, so page weight *is* the performance story:
   student taps the scanner, never on page load.
 - **PDF** — jsPDF + AutoTable (~395 KB) load only when a teacher exports.
 
+## Grading schemes (high school and college)
+
+One account can handle a high-school section and a college block, because the
+period structure belongs to the **section**, not to the account:
+
+| Preset | Periods | Final grade |
+| --- | --- | --- |
+| `k12-terms` | Term 1–3 (DO 015 s. 2026) | average of the term grades, transmutation optional |
+| `k12-quarters` | Quarter 1–4 (DO 8, legacy) | average of the quarters |
+| `college-semestral` | Prelim / Midterm / Semi-Final / Final | average, or weighted by each period's % |
+| `college-midterm-finals` | Midterm / Finals | same |
+| `custom` | anything the teacher types | same |
+| *(none)* | Quarter 1–4 + Semester 1–2 | legacy behaviour, existing scores untouched |
+
+Where it lives:
+
+* **Scores → Categories & Weights** opens the scheme editor. Pick a preset, rename
+  or add periods, choose average vs weighted, and toggle DepEd transmutation.
+* Presets also prefill the official component weights: Written Work 30 /
+  Performance Task 30 / Term Exam 40 for DO 015, Class Standing 60 / Major Exam
+  40 for college. A setup the teacher already typed is never overwritten.
+* **Scores → Final Grades** shows every period's grade plus the combined grade
+  and its descriptor (Advancing / Benchmarking / Connecting / Developing /
+  Emerging). `Save Grades CSV` exports the same table.
+* A period with no score is shown as `—`: the final grade is *running*, never a
+  silent zero. A missing weight falls back to an equal share.
+
+Storage: `section_grading_schemes` (one row per `user_id, section`), synced
+through the offline queue as the `gradingScheme` op. Sections without a row keep
+the legacy period list, so existing data needs no migration of scores.
+
+Transmutation, when enabled, records a raw grade below 70 as **75** and labels
+the cell (`transmuted from 60.00`).
+
 ## Student record access (record codes)
 
 `student-record.html` shows a learner their own attendance and grades without a
@@ -257,6 +308,9 @@ scripts/build-icon-subset.mjs         regenerates vendor/lucide-subset.js
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project
+docs/LOAD_TEST.md                     concurrency analysis + how to run the k6 test
+scripts/loadtest/k6-checkin.js        k6 harness for the check-in path (staging only)
+QA_AUDIT.md                           the 10-point QA audit: verdicts, defects, gaps
 tests/                                node:test suites
 sw.js, manifest.json                  PWA offline cache + install metadata
 vercel.json                           security + caching headers for Vercel

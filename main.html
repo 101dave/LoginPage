@@ -300,22 +300,15 @@
                         </div>
                         <div class="input-group">
                             <label for="score-section"><i data-lucide="users" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Select Section</label>
-                            <select id="score-section" onchange="loadScoreSheet()" class="form-control"></select>
+                            <select id="score-section" onchange="onScoreSectionChange()" class="form-control"></select>
                         </div>
                         <div class="input-group">
                             <label for="score-period"><i data-lucide="calendar-range" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Grading Period</label>
                             <select id="score-period" onchange="loadScoreSheet()" class="form-control">
+                                <!-- Populated by populatePeriodSelect(): the periods come
+                                     from the section's grading scheme (DepEd terms,
+                                     quarters, or college periods). -->
                                 <option value="General">Unassigned / Previous Scores</option>
-                                <optgroup label="Quarterly">
-                                    <option value="Quarter 1">Quarter 1</option>
-                                    <option value="Quarter 2">Quarter 2</option>
-                                    <option value="Quarter 3">Quarter 3</option>
-                                    <option value="Quarter 4">Quarter 4</option>
-                                </optgroup>
-                                <optgroup label="Semestral">
-                                    <option value="Semester 1">Semester 1</option>
-                                    <option value="Semester 2">Semester 2</option>
-                                </optgroup>
                             </select>
                         </div>
                     </div>
@@ -355,7 +348,27 @@
                     <span>Click <strong>+ Add</strong> on any category header to add subsections, each with its own Max score.</span>
                 </div>
             </div>
+
+            <div class="card" id="grade-summary-card">
+                <div class="card-header">
+                    <div>
+                        <h2>Final Grades</h2>
+                        <p id="grade-summary-subtitle" style="margin-top: 4px;">Every period's grade, combined the way this section requires</p>
+                    </div>
+                    <button type="button" onclick="saveGradeSummaryCsv()" class="btn btn-secondary">
+                        <i data-lucide="table"></i> Save Grades CSV
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table grade-summary-table">
+                        <thead id="grade-summary-head"></thead>
+                        <tbody id="grade-summary-body"></tbody>
+                    </table>
+                </div>
+                <p class="attendance-note">Transmuted grades are marked. A dash means that period has no score yet, so the final grade is still running.</p>
+            </div>
         </section>
+
     </main>
 
     <!-- Modal: Per-Section Categories & Grading Weights -->
@@ -369,7 +382,49 @@
                 <button type="button" onclick="closeModal('modal-grading-setup')" class="close-btn" aria-label="Close modal"><i data-lucide="x"></i></button>
             </div>
             <form id="form-grading-setup" onsubmit="saveGradingSetup(event)" class="modal-form">
-                <p class="modal-body-copy">Add categories for this section (Written Work, Performance Task, Quiz, Midterm, etc.), set how many subsections/items each category has (e.g. 6 Written Works), and assign weights totaling 100%.</p>
+                <fieldset class="grading-scheme-block">
+                    <legend>Grading periods</legend>
+                    <p class="modal-body-copy">High school and college record grades differently. Pick the structure this section follows — it applies to this section only, so one account can handle both.</p>
+
+                    <div class="grading-scheme-controls">
+                        <div class="input-group">
+                            <label for="grading-preset">School level / structure</label>
+                            <select id="grading-preset" class="form-control" onchange="applyGradingPreset()">
+                                <option value="legacy">Keep current — Quarters &amp; Semesters</option>
+                                <option value="k12-terms">High School — DO 015 s. 2026 (3 terms)</option>
+                                <option value="k12-quarters">High School — Quarters (DO 8, legacy)</option>
+                                <option value="college-semestral">College — Prelim / Midterm / Semi-Final / Final</option>
+                                <option value="college-midterm-finals">College — Midterm / Finals</option>
+                                <option value="custom">Custom — I will name the periods</option>
+                            </select>
+                            <p id="grading-scheme-hint" class="field-hint"></p>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="grading-final-rule">Final grade from the periods</label>
+                            <select id="grading-final-rule" class="form-control">
+                                <option value="average">Average — every period counts equally</option>
+                                <option value="weighted">Weighted — each period's share below decides</option>
+                            </select>
+                            <label class="checkbox-row" for="grading-transmute">
+                                <input type="checkbox" id="grading-transmute">
+                                <span>Apply DepEd transmutation (a raw grade below 70 is recorded as 75)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="grading-weight-head grading-period-head" aria-hidden="true">
+                        <span>Period</span><span id="grading-period-weight-head">Weight (optional)</span><span></span>
+                    </div>
+                    <div id="grading-period-rows" class="grading-period-rows"></div>
+                    <button type="button" onclick="addGradingPeriodRow()" class="btn btn-secondary grading-add-category">
+                        <i data-lucide="plus"></i> Add Period
+                    </button>
+                </fieldset>
+
+                <fieldset class="grading-category-block">
+                    <legend>Categories &amp; weights (per period)</legend>
+                    <p class="modal-body-copy">Add categories for this section (Written Work, Performance Task, Quiz, Midterm, etc.), set how many subsections/items each category has (e.g. 6 Written Works), and assign weights totaling 100%.</p>
                 <div class="grading-weight-head" aria-hidden="true"><span>Category</span><span>Subsections</span><span>Weight</span><span></span></div>
                 <div id="grading-weight-rows" class="grading-weight-rows"></div>
                 <button type="button" id="add-grade-category-btn" onclick="addGradingCategoryRow()" class="btn btn-secondary grading-add-category">
@@ -378,6 +433,7 @@
                 <div class="grading-totals">
                     <div id="grading-section-total" class="grading-weight-total" aria-live="polite">Section total: 0%</div>
                 </div>
+                </fieldset>
                 <p id="grading-setup-error" class="grading-setup-error hidden" role="alert"></p>
                 <div class="modal-footer">
                     <button type="button" onclick="closeModal('modal-grading-setup')" class="btn btn-secondary">Cancel</button>
