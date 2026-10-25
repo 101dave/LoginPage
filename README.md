@@ -143,7 +143,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # UI/PDF/backup/SMS/static checks (jsdom, no network)
+npm test                  # UI/PDF/backup/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
@@ -176,7 +176,6 @@ public client credentials, protected by Row Level Security).
 ```
 index.html, script.js, style.css      auth UI
 main.html, main.js, main.css, pdf.js  teacher app + daily PDF builder
-sms.js                                guardian-SMS helpers (encoding, cost, rules)
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project

@@ -59,6 +59,10 @@ Your grading engine is still built for the **repealed** order:
 
 Teachers currently discover an absence on the dashboard and then… text the parent manually, or don't. There is no guardian field in the app at all (`students` has name / ID / email only).
 
+> **Status: on hold (Oct 2026).** Parked by request — the SMS encoding/cost/rule
+> helpers were prototyped and tested, then removed from the tree; they stay
+> recoverable from git history (commit `391088d`) if this is picked up later.
+
 > **Proposal #2 — Guardian loop.**
 > `guardian_name` + `guardian_contact` on students; one-tap **Notify guardian** from the watchlist and attendance sheet that opens a pre-filled message ("Hi Ma'am/Sir, this is to inform you that *Juan* was absent on *Oct 23* (4th absence this term). — Ms. Cruz"), via `sms:` link, Web Share, or copy; a `notifications` log so you know who was already told; a printable absence notice slip; and a **parent portal** built on the existing `student-record.html` — an unguessable, expiring, `noindex` link showing attendance + term grades.
 > **Why it stands out:** it's the "so what" of attendance data, and almost nobody in the local market does it because it needs both sides — the record *and* the grade. Also directly reduces dropouts, which is what DepEd actually measures.
