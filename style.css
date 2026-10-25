@@ -162,6 +162,7 @@ body {
 
 .tabs {
     display: flex;
+    gap: 4px;
     background: #f1f5f9;
     padding: 4px;
     border-radius: var(--radius-sm);
@@ -173,13 +174,15 @@ body {
     flex: 1;
     background: transparent;
     border: none;
-    padding: 0.625rem;
-    font-size: 0.875rem;
+    padding: 0.625rem 0.5rem;
+    font-size: 0.84375rem;
     font-weight: 600;
     color: var(--text-muted);
     cursor: pointer;
     border-radius: 6px;
     transition: var(--transition);
+    white-space: nowrap;
+    text-align: center;
 }
 
 .tab.active {
@@ -340,62 +343,11 @@ body {
     border: 1px solid var(--error-border);
 }
 
-.student-portal-banner {
-    margin-top: 1rem;
-    padding: 1rem 1.25rem;
-    background: #ffffff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-sm);
-}
-
-.student-portal-content {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-
-.student-portal-text strong {
-    display: block;
-    font-size: 0.9375rem;
-    color: var(--text-main);
-    margin-bottom: 0.2rem;
-}
-
-.student-portal-text p {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    line-height: 1.4;
-    margin: 0;
-}
-
-.btn-student-portal {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    padding: 0.7rem 1rem;
-    background: #f8fafc;
-    color: var(--text-main);
-    border: 1px solid #cbd5e1;
-    border-radius: var(--radius-sm);
-    font-size: 0.875rem;
-    font-weight: 600;
-    text-decoration: none;
-    transition: var(--transition);
-}
-
-.btn-student-portal:hover {
-    background: #f1f5f9;
-    border-color: #94a3b8;
-}
-
 .auth-student-divider {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 1.15rem 0 0.75rem;
+    margin: 1.15rem 0 0.85rem;
     color: var(--text-muted);
     font-size: 0.75rem;
     font-weight: 600;
@@ -408,36 +360,14 @@ body {
     content: "";
     flex: 1;
     height: 1px;
-    background: var(--border);
-}
-
-.btn-secondary-scan {
-    width: 100%;
-    padding: 0.72rem 1rem;
-    background: #f8fafc;
-    color: var(--text-main);
-    border: 1px solid #cbd5e1;
-    border-radius: var(--radius-sm);
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: var(--transition);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-.btn-secondary-scan:hover {
-    background: #f1f5f9;
-    border-color: #94a3b8;
+    background: var(--border-color);
 }
 
 .login-qr-stage {
     background: #f8fafc;
     border: 1.5px dashed #cbd5e1;
     border-radius: var(--radius-sm);
-    padding: 1.1rem;
+    padding: 1.25rem 1rem;
     text-align: center;
 }
 
@@ -458,8 +388,9 @@ body {
 
 .login-qr-placeholder p {
     font-size: 0.8125rem;
-    line-height: 1.4;
+    line-height: 1.45;
     margin: 0;
+    max-width: 280px;
 }
 
 .login-qr-actions {
@@ -468,11 +399,11 @@ body {
     justify-content: center;
     gap: 8px;
     width: 100%;
-    margin-top: 0.25rem;
+    margin-top: 0.35rem;
 }
 
 .btn-qr-action {
-    padding: 0.55rem 0.9rem;
+    padding: 0.55rem 0.95rem;
     background: #ffffff;
     color: var(--text-main);
     border: 1px solid #cbd5e1;
