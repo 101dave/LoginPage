@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v14/);
+    assert.match(sw, /scholog-shell-v15/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -165,8 +165,13 @@ test("grading migration preserves scores and scopes categories and subsections p
     assert.match(itemsSql, /add column if not exists items jsonb not null default '\[\]'::jsonb/);
     assert.match(itemsSql, /add column if not exists item_id text/);
     assert.match(itemsSql, /add column if not exists item_label text/);
+    assert.match(itemsSql, /drop index if exists public\.scores_user_date_student_period_category_key/);
     assert.match(itemsSql, /on public\.scores \(user_id, date, student_id, grading_period, category_id, item_id\)/);
     assert.match(itemsSql, /notify pgrst, 'reload schema'/);
+
+    const dropLegacyIdxSql = read("supabase/migrations/20261025_drop_legacy_score_category_unique_index.sql");
+    assert.match(dropLegacyIdxSql, /drop index if exists public\.scores_user_date_student_period_category_key/);
+    assert.match(dropLegacyIdxSql, /on public\.scores \(user_id, date, student_id, grading_period, category_id, item_id\)/);
 
     assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id,item_id"/);
     assert.doesNotMatch(html, /grading-global-total/);
