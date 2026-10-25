@@ -3390,12 +3390,23 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, itemI
 
 function gradingCategoryRowMarkup(category) {
     const itemCount = Array.isArray(category.items) && category.items.length > 0 ? category.items.length : 1;
+    // Labels are hidden on a wide screen (the header row does that job) and shown
+    // on a phone, where the four columns become a stacked card.
     return `<div class="grading-weight-row" data-category-id="${esc(category.id)}">
-        <input type="text" class="form-control grading-category-name" value="${esc(category.name)}" maxlength="60" placeholder="e.g. Written Work" aria-label="Category name">
-        <input type="number" class="form-control grading-category-items" min="1" max="30" step="1" value="${esc(itemCount)}" aria-label="Subsections for ${esc(category.name || "category")}" title="Number of subsections / graded items">
-        <div class="grading-weight-input">
-            <input type="number" class="form-control grading-category-weight" min="0" max="100" step="0.01" value="${esc(category.weight)}" aria-label="Weight for ${esc(category.name || "category")}" oninput="updateGradingTotals()">
-            <span>%</span>
+        <div class="grading-cell grading-cell-name">
+            <span class="grading-cell-label" aria-hidden="true">Category</span>
+            <input type="text" class="form-control grading-category-name" value="${esc(category.name)}" maxlength="60" placeholder="e.g. Written Work" aria-label="Category name">
+        </div>
+        <div class="grading-cell grading-cell-items">
+            <span class="grading-cell-label" aria-hidden="true">Subsections</span>
+            <input type="number" class="form-control grading-category-items" min="1" max="30" step="1" value="${esc(itemCount)}" aria-label="Subsections for ${esc(category.name || "category")}" title="Number of subsections / graded items">
+        </div>
+        <div class="grading-cell grading-cell-weight">
+            <span class="grading-cell-label" aria-hidden="true">Weight</span>
+            <div class="grading-weight-input">
+                <input type="number" class="form-control grading-category-weight" min="0" max="100" step="0.01" value="${esc(category.weight)}" aria-label="Weight for ${esc(category.name || "category")}" oninput="updateGradingTotals()">
+                <span>%</span>
+            </div>
         </div>
         <button type="button" class="grading-category-remove" onclick="removeGradingCategoryRow(this)" title="Remove category" aria-label="Remove ${esc(category.name || "category")}">&times;</button>
     </div>`;
@@ -3444,13 +3455,19 @@ function setGradingSetupError(message = "") {
 
 function gradingPeriodRowMarkup(period = { name: "", weight: null }) {
     return `<div class="grading-period-row">
-        <input type="text" class="form-control grading-period-name" maxlength="40"
-               placeholder="e.g. Term 1" value="${esc(period.name || "")}" aria-label="Grading period name">
-        <input type="number" class="form-control grading-period-weight" min="0" max="100" step="0.01"
-               placeholder="equal" value="${period.weight == null ? "" : Number(period.weight)}"
-               aria-label="Share of the final grade">
+        <div class="grading-cell grading-cell-name">
+            <span class="grading-cell-label" aria-hidden="true">Period</span>
+            <input type="text" class="form-control grading-period-name" maxlength="40"
+                   placeholder="e.g. Term 1" value="${esc(period.name || "")}" aria-label="Grading period name">
+        </div>
+        <div class="grading-cell grading-cell-weight">
+            <span class="grading-cell-label" aria-hidden="true">Share of final grade</span>
+            <input type="number" class="form-control grading-period-weight" min="0" max="100" step="0.01"
+                   placeholder="equal" value="${period.weight == null ? "" : Number(period.weight)}"
+                   aria-label="Share of the final grade">
+        </div>
         <button type="button" class="icon-btn grading-period-remove" onclick="removeGradingPeriodRow(this)"
-                title="Remove this period" aria-label="Remove this period"><i data-lucide="x"></i></button>
+                title="Remove this period" aria-label="Remove this period">&times;</button>
     </div>`;
 }
 
