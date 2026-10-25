@@ -1486,8 +1486,9 @@ body.auth-pending {
 .score-spreadsheet-wrap {
     max-height: 66vh;
     overflow: auto;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
+    border: 0;
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0;
     background: var(--bg-card);
 }
 
@@ -1497,97 +1498,137 @@ body.auth-pending {
     border-collapse: separate;
     border-spacing: 0;
     table-layout: fixed;
+    text-align: center;
 }
 
-.score-spreadsheet th,
-.score-spreadsheet td {
-    height: 52px;
+#view-scores .score-spreadsheet th,
+#view-scores .score-spreadsheet td {
+    height: 54px;
     padding: 0;
     border-right: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
     background: var(--bg-card);
+    text-align: center;
+    vertical-align: middle;
     white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
 }
 
-.score-spreadsheet thead th {
+#view-scores .score-spreadsheet thead th {
     position: sticky;
     top: 0;
     z-index: 7;
     height: auto;
-    padding: 7px 8px;
+    padding: 8px 10px;
     background: var(--border-light);
+    text-align: center;
     vertical-align: middle;
 }
 
-.score-spreadsheet thead tr.score-head-group-row th.score-grid-category-group {
-    height: 46px;
-    min-height: 46px;
-    padding: 6px 10px;
+#view-scores .score-spreadsheet thead tr.score-head-group-row th.score-grid-category-group {
+    height: 76px;
+    min-height: 76px;
+    padding: 8px 10px;
     background: #eef2ff;
+    text-align: center;
+    vertical-align: middle;
 }
 
-.score-spreadsheet thead tr.score-head-item-row th {
-    top: 46px;
-    min-height: 62px;
-    padding: 6px 8px;
+#view-scores .score-spreadsheet thead tr.score-head-item-row th {
+    top: var(--score-group-row-height, 76px);
+    min-height: 64px;
+    padding: 7px 8px;
     background: var(--border-light);
+    text-align: center;
+    vertical-align: middle;
 }
 
 .score-spreadsheet tr:not(.score-head-item-row) > *:last-child { border-right: 0; }
 .score-spreadsheet tbody tr:last-child > * { border-bottom: 0; }
 .score-spreadsheet tbody tr:hover td { background: var(--bg-row-hover); }
 
-.score-grid-index {
+#view-scores .score-grid-index {
     position: sticky;
     left: 0;
     z-index: 4;
-    width: 46px;
-    min-width: 46px;
-    max-width: 46px;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
     text-align: center !important;
+    vertical-align: middle !important;
+    font-weight: 700;
     color: var(--text-muted);
 }
 
-.score-grid-student {
+#view-scores .score-grid-student {
     position: sticky;
-    left: 46px;
+    left: 50px;
     z-index: 4;
     width: 210px;
     min-width: 210px;
     max-width: 210px;
+    text-align: center !important;
+    vertical-align: middle !important;
     box-shadow: 3px 0 0 rgba(15, 23, 42, 0.06);
 }
 
-td.score-grid-student { padding: 8px 12px; }
-.score-grid-student strong,
-.score-grid-student small { display: block; }
-.score-grid-student strong { overflow-wrap: anywhere; line-height: 1.35; }
-.score-grid-student small {
+#view-scores td.score-grid-student {
+    padding: 10px 12px;
+    text-align: center !important;
+}
+#view-scores .score-grid-student strong,
+#view-scores .score-grid-student small {
+    display: block;
+    text-align: center;
+}
+#view-scores .score-grid-student strong {
+    color: var(--text-main);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+#view-scores .score-grid-student small {
     margin-top: 3px;
     color: var(--text-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 10px;
+    font-size: 10.5px;
+    line-height: 1.25;
 }
 
-.score-spreadsheet thead .score-grid-index,
-.score-spreadsheet thead .score-grid-student { z-index: 9; }
+#view-scores .score-spreadsheet thead .score-grid-index,
+#view-scores .score-spreadsheet thead .score-grid-student {
+    z-index: 9;
+    color: var(--text-main);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+}
 
-.score-grid-category-group {
-    text-align: center;
+#view-scores .score-grid-category-group {
+    text-align: center !important;
+    vertical-align: middle !important;
 }
 
 .score-category-group-bar {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    flex-wrap: nowrap;
+    gap: 5px;
+    width: 100%;
+    text-align: center;
 }
 
 .score-add-item-btn {
     flex-shrink: 0;
-    height: 22px;
-    padding: 0 7px;
+    height: 21px;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 1px solid rgba(79, 70, 229, 0.28);
     border-radius: 999px;
     background: var(--bg-card);
@@ -1595,6 +1636,7 @@ td.score-grid-student { padding: 8px 12px; }
     font-size: 10px;
     font-weight: 700;
     line-height: 1;
+    text-align: center;
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -1606,49 +1648,71 @@ td.score-grid-student { padding: 8px 12px; }
     color: #fff;
 }
 
-.score-grid-category {
-    width: 118px;
-    min-width: 118px;
-    max-width: 118px;
-    text-align: center;
+#view-scores .score-grid-category {
+    width: 126px;
+    min-width: 126px;
+    max-width: 126px;
+    text-align: center !important;
+    vertical-align: middle !important;
 }
 
-.score-category-heading { min-width: 0; }
+#view-scores .score-grid-category.score-col-single,
+#view-scores .score-grid-cell.score-col-single {
+    width: 164px;
+    min-width: 164px;
+    max-width: 164px;
+}
+
+.score-category-heading {
+    width: 100%;
+    min-width: 0;
+    text-align: center;
+}
 .score-category-heading strong,
-.score-category-heading small { display: block; }
+.score-category-heading small {
+    display: block;
+    text-align: center;
+}
 .score-category-heading strong {
     color: var(--text-main);
-    font-size: 11.5px;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.3;
+    overflow-wrap: break-word;
+    word-break: normal;
     text-transform: none;
-    letter-spacing: 0;
+    letter-spacing: 0.01em;
 }
 .score-category-heading small {
-    margin-top: 1px;
+    margin-top: 2px;
     color: var(--text-muted);
-    font-size: 9.5px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.25;
     text-transform: none;
     letter-spacing: 0;
 }
 
 .score-item-bar {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    width: 100%;
+    min-height: 24px;
 }
 
 .score-item-label-input {
     width: 100%;
     min-width: 0;
-    height: 22px;
-    padding: 1px 4px;
+    height: 24px;
+    padding: 2px 22px;
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: 5px;
     background: transparent;
     color: var(--text-main);
-    font-size: 11px;
+    font-family: inherit;
+    font-size: 11.5px;
     font-weight: 700;
     text-align: center;
     text-transform: none;
@@ -1668,7 +1732,10 @@ td.score-grid-student { padding: 8px 12px; }
 }
 
 .score-remove-item-btn {
-    flex-shrink: 0;
+    position: absolute;
+    right: 1px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 20px;
     height: 20px;
     padding: 0;
@@ -1691,83 +1758,126 @@ td.score-grid-student { padding: 8px 12px; }
 }
 
 .score-column-max-label {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    margin-top: 5px;
+    gap: 4px;
+    margin: 5px auto 0;
+    padding: 1px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-card);
     color: var(--text-muted);
     font-size: 10px;
+    font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.score-column-max-label:focus-within {
+    border-color: var(--blue-text);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
 }
 
 .score-column-max {
-    width: 58px;
-    height: 26px;
-    padding: 2px 4px;
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    background: var(--bg-card);
+    width: 44px;
+    height: 22px;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--text-main);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 700;
     text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
 }
 
 .score-column-max:focus {
-    outline: 2px solid var(--blue-text);
-    outline-offset: 1px;
-    border-color: var(--blue-text);
+    outline: none;
 }
 
-.score-grid-cell {
-    width: 118px;
-    min-width: 118px;
-    max-width: 118px;
+.score-column-max::-webkit-outer-spin-button,
+.score-column-max::-webkit-inner-spin-button,
+.score-input::-webkit-outer-spin-button,
+.score-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+#view-scores .score-grid-cell {
+    width: 126px;
+    min-width: 126px;
+    max-width: 126px;
     padding: 0 !important;
-    text-align: center;
+    text-align: center !important;
+    vertical-align: middle !important;
 }
 
-.score-grid-final {
+#view-scores .score-grid-final {
     position: sticky;
     right: 0;
     z-index: 4;
-    width: 152px;
-    min-width: 152px;
-    max-width: 152px;
+    width: 158px;
+    min-width: 158px;
+    max-width: 158px;
+    padding: 8px 10px !important;
+    text-align: center !important;
+    vertical-align: middle !important;
     box-shadow: -3px 0 0 rgba(15, 23, 42, 0.06);
 }
-.score-spreadsheet thead .score-grid-final { z-index: 9; background: var(--emerald-bg); }
-.score-spreadsheet td.score-grid-final { background: var(--emerald-bg); }
-.score-grid-empty {
+#view-scores .score-spreadsheet thead .score-grid-final {
+    z-index: 9;
+    background: var(--emerald-bg);
+    color: var(--emerald-text);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+}
+#view-scores .score-spreadsheet td.score-grid-final { background: var(--emerald-bg); }
+#view-scores .score-grid-empty {
     padding: 28px !important;
     color: var(--text-muted);
-    text-align: center;
+    text-align: center !important;
+    vertical-align: middle !important;
 }
 
 .score-sheet-legend {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 8px 18px;
-    margin-top: 12px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 24px;
+    margin-top: 0;
+    padding: 12px 20px;
+    background: #f8fafc;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 11.5px;
     line-height: 1.5;
+    text-align: center;
 }
-.score-sheet-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.score-sheet-legend svg { width: 14px; height: 14px; }
+.score-sheet-legend span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+}
+.score-sheet-legend svg { width: 14px; height: 14px; flex-shrink: 0; }
 
 @media (max-width: 640px) {
     .score-spreadsheet-wrap { max-height: 62vh; }
-    .score-grid-student { width: 150px; min-width: 150px; max-width: 150px; }
-    .score-grid-category,
-    .score-grid-cell { width: 108px; min-width: 108px; max-width: 108px; }
-    .score-grid-final { width: 134px; min-width: 134px; max-width: 134px; }
-    .score-spreadsheet tbody .score-grid-final { position: static; box-shadow: none; }
-    .score-spreadsheet thead .score-grid-final { right: auto; box-shadow: none; }
+    #view-scores .score-grid-student { width: 156px; min-width: 156px; max-width: 156px; }
+    #view-scores .score-grid-category,
+    #view-scores .score-grid-cell { width: 114px; min-width: 114px; max-width: 114px; }
+    #view-scores .score-grid-category.score-col-single,
+    #view-scores .score-grid-cell.score-col-single { width: 142px; min-width: 142px; max-width: 142px; }
+    #view-scores .score-grid-final { width: 138px; min-width: 138px; max-width: 138px; }
+    #view-scores .score-spreadsheet tbody .score-grid-final { position: static; box-shadow: none; }
+    #view-scores .score-spreadsheet thead .score-grid-final { right: auto; box-shadow: none; }
 }
 
 .score-setup-bar {
@@ -1794,12 +1904,14 @@ td.score-grid-student { padding: 8px 12px; }
 
 .final-grade-cell {
     min-width: 140px;
+    text-align: center !important;
     white-space: normal !important;
 }
 
 .final-grade-cell strong,
 .final-grade-cell small {
     display: block;
+    text-align: center;
 }
 
 .final-grade-value {
@@ -1812,13 +1924,13 @@ td.score-grid-student { padding: 8px 12px; }
 .final-grade-cell small {
     margin-top: 3px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 10.5px;
     line-height: 1.35;
 }
 
 .final-grade-cell .final-grade-complete { color: var(--emerald-text); font-weight: 700; }
-.final-grade-cell .final-grade-running { color: var(--amber-text); }
-.final-grade-empty { color: var(--text-muted); font-size: 18px; }
+.final-grade-cell .final-grade-running { color: var(--amber-text); font-weight: 600; }
+.final-grade-empty { display: block; color: var(--text-muted); font-size: 18px; text-align: center; }
 
 .grading-setup-modal { max-width: 680px; }
 .grading-weight-rows { display: flex; flex-direction: column; gap: 10px; }
@@ -1917,16 +2029,19 @@ td.score-grid-student { padding: 8px 12px; }
 /* Score input in the dedicated Student Scores sheet */
 .score-input {
     width: 100%;
-    min-height: 50px;
-    padding: 8px 10px;
+    height: 100%;
+    min-height: 52px;
+    padding: 8px 6px;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     text-align: center;
     border: 0;
     border-radius: 0;
     background: transparent;
     color: var(--text-main);
+    -moz-appearance: textfield;
+    appearance: textfield;
 }
 
 .score-input:hover { background: var(--blue-bg); }

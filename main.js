@@ -1756,25 +1756,45 @@ function itemMaximumKey(categoryId, itemId) {
     return `${categoryId}::${itemId}`;
 }
 
+function syncScoreHeaderStickyOffset() {
+    const apply = () => {
+        const tableEl = document.querySelector("#view-scores .score-spreadsheet");
+        const groupRow = document.querySelector("#score-table-head tr.score-head-group-row");
+        if (!tableEl || !groupRow) return;
+        const height = Math.round(groupRow.getBoundingClientRect?.().height || groupRow.offsetHeight || 0);
+        if (height > 0) {
+            tableEl.style.setProperty("--score-group-row-height", `${height}px`);
+        }
+    };
+    apply();
+    if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(apply);
+    }
+}
+
+window.addEventListener("resize", () => {
+    if (activeTab === "scores") syncScoreHeaderStickyOffset();
+});
+
 function renderScoreSheetHeader(categories, itemMaximums) {
     const tableHead = document.getElementById("score-table-head");
     if (!tableHead) return;
     if (categories.length === 0) {
         tableHead.innerHTML = `<tr class="score-head-group-row">
-            <th class="score-grid-index">#</th>
-            <th class="score-grid-student">Student</th>
-            <th class="score-grid-final">Final Grade</th>
+            <th class="text-center score-grid-index">#</th>
+            <th class="text-center score-grid-student">Student</th>
+            <th class="text-center score-grid-final">Final Grade</th>
         </tr>`;
         return;
     }
 
     tableHead.innerHTML = `
         <tr class="score-head-group-row">
-            <th rowspan="2" class="score-grid-index">#</th>
-            <th rowspan="2" class="score-grid-student">Student</th>
+            <th rowspan="2" class="text-center score-grid-index">#</th>
+            <th rowspan="2" class="text-center score-grid-student">Student</th>
             ${categories.map(category => {
                 const items = getCategoryItems(category);
-                return `<th colspan="${items.length}" class="score-grid-category-group" data-category-id="${esc(category.id)}">
+                return `<th colspan="${items.length}" class="text-center score-grid-category-group" data-category-id="${esc(category.id)}">
                     <div class="score-category-group-bar">
                         <div class="score-category-heading">
                             <strong>${esc(category.name)}</strong>
@@ -1787,14 +1807,15 @@ function renderScoreSheetHeader(categories, itemMaximums) {
                     </div>
                 </th>`;
             }).join("")}
-            <th rowspan="2" class="score-grid-final">Final Grade</th>
+            <th rowspan="2" class="text-center score-grid-final">Final Grade</th>
         </tr>
         <tr class="score-head-item-row">
             ${categories.flatMap(category => {
                 const items = getCategoryItems(category);
+                const singleClass = items.length === 1 ? " score-col-single" : "";
                 return items.map((item, itemIdx) => {
                     const maximum = itemMaximums.get(itemMaximumKey(category.id, item.id)) || 100;
-                    return `<th class="score-grid-category" data-category-id="${esc(category.id)}" data-item-id="${esc(item.id)}">
+                    return `<th class="text-center score-grid-category${singleClass}" data-category-id="${esc(category.id)}" data-item-id="${esc(item.id)}">
                         <div class="score-item-bar">
                             <input type="text" class="score-item-label-input" value="${esc(item.label)}" maxlength="40"
                                 placeholder="#${itemIdx + 1}"
@@ -1817,6 +1838,7 @@ function renderScoreSheetHeader(categories, itemMaximums) {
             }).join("")}
         </tr>
     `;
+    syncScoreHeaderStickyOffset();
 }
 
 function renderScoreWeightSummary(section) {
@@ -2095,29 +2117,30 @@ function loadScoreSheet() {
 
     tableBody.innerHTML = "";
     if (!selectedSec) {
-        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center score-grid-empty">No sections yet. Go to <strong>Class List</strong> and click <strong>Add Section</strong> first.</td></tr>`;
         return;
     }
     if (!selectedDate) {
-        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">Please select a valid date above.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center score-grid-empty">Please select a valid date above.</td></tr>`;
         return;
     }
     if (secStudents.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">No students in this section. Add students from Class List view.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center score-grid-empty">No students in this section. Add students from Class List view.</td></tr>`;
         return;
     }
     if (categories.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="score-grid-empty">Open <strong>Categories &amp; Weights</strong> to add category columns for this section.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center score-grid-empty">Open <strong>Categories &amp; Weights</strong> to add category columns for this section.</td></tr>`;
         return;
     }
 
     secStudents.forEach((stud, idx) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td class="score-grid-index">${idx + 1}</td>
-            <td class="score-grid-student"><strong>${esc(stud.name)}</strong><small>${esc(stud.student_id)}</small></td>
+            <td class="text-center score-grid-index">${idx + 1}</td>
+            <td class="text-center score-grid-student"><strong>${esc(stud.name)}</strong><small>${esc(stud.student_id)}</small></td>
             ${categories.flatMap(category => {
                 const items = getCategoryItems(category);
+                const singleClass = items.length === 1 ? " score-col-single" : "";
                 return items.map(item => {
                     const record = findScoreRecord(selectedDate, stud.student_id, selectedPeriod, category, item);
                     const currentScore = record.value;
@@ -2126,7 +2149,7 @@ function loadScoreSheet() {
                         ? currentMaxValue
                         : itemMaximums.get(itemMaximumKey(category.id, item.id));
                     const titleLabel = items.length > 1 ? `${category.name} (${item.label})` : category.name;
-                    return `<td class="score-grid-cell">
+                    return `<td class="text-center score-grid-cell${singleClass}">
                         <input type="number" class="score-input" min="0" max="${esc(currentMaximum)}" step="any"
                             value="${currentScore ? esc(currentScore.score) : ""}" placeholder="—"
                             title="${esc(titleLabel)}: enter 0 to ${esc(currentMaximum)}"
