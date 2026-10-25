@@ -339,7 +339,9 @@ test("student scores: independent per-section categories, weights and weighted f
     await waitFor(() => db.scores.some(row => row.category_id === writtenId && row.score === 40));
     let finalCell = document.querySelector("#score-table-body .final-grade-cell");
     assert.match(finalCell.textContent, /80\.00%/);
-    assert.match(finalCell.textContent, /Running · 60% weighted/);
+    assert.match(finalCell.textContent, /Running · 60%/);
+    assert.doesNotMatch(finalCell.textContent, /weighted/i);
+    assert.doesNotMatch(document.getElementById("score-table-head").textContent, /% weight/i);
 
     maxInput = document.querySelector(`#score-table-head .score-column-max[data-category-id="${projectId}"]`);
     maxInput.value = "100";
@@ -944,6 +946,8 @@ test("student scores: categories support multiple subsections (e.g. 6 Written Wo
     assert.match(mainCss, /\.score-category-group-bar\s*\{[^}]*flex-direction:\s*column/, "category header stacks + Add under centered title");
     assert.match(mainCss, /\.score-remove-item-btn\s*\{[^}]*position:\s*absolute/, "remove item button does not push subsection label off-center");
     assert.match(mainCss, /\.score-input::-webkit-inner-spin-button[\s\S]*?-webkit-appearance:\s*none/, "number spin arrows removed so scores center cleanly");
+    assert.equal(groupHeaders[0].querySelector(".score-category-heading small").textContent, "30% · 6 items");
+    assert.doesNotMatch(document.getElementById("score-table-head").textContent, /% weight/i);
     assert.match(
         document.getElementById("score-weight-summary").textContent,
         /Written Work 30% \(6 items\) · Quiz 20% \(2 items\) · Performance Task 50% \(2 items\)/
@@ -995,7 +999,8 @@ test("student scores: categories support multiple subsections (e.g. 6 Written Wo
 
     let finalCell = document.querySelector("#score-table-body tr:first-child .final-grade-cell");
     assert.match(finalCell.textContent, /90\.00%/);
-    assert.match(finalCell.textContent, /Running · 30% weighted/);
+    assert.match(finalCell.textContent, /Running · 30%/);
+    assert.doesNotMatch(finalCell.textContent, /weighted/i);
 
     // Switch calendar date forward (e.g. next class meeting) within Quarter 1:
     // previously graded Written Works stay visible on the Quarter 1 sheet!
