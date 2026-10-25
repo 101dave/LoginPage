@@ -2086,3 +2086,257 @@ body.auth-pending {
     background: var(--amber-bg);
     color: var(--amber-text);
 }
+
+/* Dashboard Watchlist, Section Pills & Quick Actions */
+.nav-install-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.dash-sec-pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.dash-sec-unrecorded {
+    background: var(--border-light);
+    color: var(--text-muted);
+}
+
+.dash-sec-late {
+    background: var(--amber-bg);
+    color: var(--amber-text);
+}
+
+.dash-sec-absent {
+    background: var(--rose-bg);
+    color: var(--rose-text);
+}
+
+.dash-sec-excused {
+    background: var(--blue-bg);
+    color: var(--blue-text);
+}
+
+.dash-take-att-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.watchlist-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.badge-emerald {
+    background-color: var(--emerald-bg);
+    color: var(--emerald-text);
+    border-color: var(--emerald-border);
+}
+
+.badge-amber {
+    background-color: var(--amber-bg);
+    color: var(--amber-text);
+    border-color: var(--amber-border);
+}
+
+.badge-rose {
+    background-color: var(--rose-bg);
+    color: var(--rose-text);
+    border-color: var(--rose-border);
+}
+
+/* Take Attendance Saved vs Unsaved Subtitle Badge */
+.att-save-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.att-save-unsaved {
+    background: var(--amber-bg);
+    color: var(--amber-text);
+    border: 1px solid var(--amber-border);
+}
+
+.att-save-partial {
+    background: var(--blue-bg);
+    color: var(--blue-text);
+    border: 1px solid var(--blue-border);
+}
+
+.att-save-saved {
+    background: var(--emerald-bg);
+    color: var(--emerald-text);
+    border: 1px solid var(--emerald-border);
+}
+
+/* Single / Bulk Student Modal Mode Tabs */
+.student-modal-mode-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    background: var(--bg-body);
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    margin-bottom: 14px;
+}
+
+.student-mode-tab {
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.student-mode-tab.active {
+    background: var(--bg-card);
+    color: var(--text-main);
+    box-shadow: var(--shadow-sm);
+}
+
+.bulk-import-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+
+.bulk-import-toolbar label {
+    margin-bottom: 0;
+}
+
+.bulk-csv-upload-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-bottom: 0 !important;
+}
+
+.bulk-student-textarea {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.bulk-preview-summary {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-body);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    margin-bottom: 12px;
+}
+
+.bulk-preview-summary.has-ready {
+    background: var(--emerald-bg);
+    color: var(--emerald-text);
+    border-color: var(--emerald-border);
+}
+
+.bulk-preview-summary.has-warning {
+    background: var(--amber-bg);
+    color: var(--amber-text);
+    border-color: var(--amber-border);
+}
+
+/* Bulk Section QR Cards Modal & Print Grid */
+.modal-box.modal-qr-bulk-mode {
+    max-width: 720px;
+    width: 95vw;
+}
+
+.student-qr-bulk-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 12px;
+    max-height: 62vh;
+    overflow-y: auto;
+    padding: 6px 2px;
+    width: 100%;
+}
+
+.bulk-qr-card-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px 10px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.bulk-qr-svg {
+    width: 128px;
+    height: 128px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bulk-qr-svg svg {
+    width: 100%;
+    height: 100%;
+}
+
+.bulk-qr-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.25;
+}
+
+.bulk-qr-code {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.bulk-qr-sec {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+@media print {
+    .modal-box.modal-qr-bulk-mode {
+        max-width: 100% !important;
+        width: 100% !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    .student-qr-bulk-grid {
+        max-height: none !important;
+        overflow: visible !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 14px !important;
+    }
+
+    .bulk-qr-card-item {
+        border: 1px solid #cbd5e1 !important;
+    }
+}
+

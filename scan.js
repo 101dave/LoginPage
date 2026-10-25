@@ -161,6 +161,17 @@
         return url.href;
     }
 
+    function buildStudentRecordUrl(studentId, userId) {
+        if (!studentId) return "";
+        const url = new URL("student-record.html", window.location.href);
+        url.search = "";
+        url.hash = "";
+        if (state.token) url.searchParams.set("t", state.token);
+        url.searchParams.set("student_id", studentId);
+        if (userId) url.searchParams.set("user_id", userId);
+        return url.href;
+    }
+
     // Normalise whatever a QR code contains into a plain Student ID.
     function extractStudentId(raw) {
         let text = String(raw == null ? "" : raw).trim();
@@ -482,32 +493,25 @@
                 }
 
                 // Lock this phone to this student for the rest of the session.
+                const userId = state.session && state.session.user_id ? state.session.user_id : "";
                 writeDeviceLock({
                     token: state.token,
                     studentId: data.student_id,
                     name: data.student_name || "Student",
+                    userId,
                     at: Date.now()
                 });
                 state.deviceLocked = true;
 
+                // Point "View my record" to the student's attendance + score record page.
+                const recordUrl = buildStudentRecordUrl(data.student_id, userId);
+
                 showResult(data.already_marked ? "info" : "success",
                     data.already_marked ? "Already checked in" : `${name.split(" ")[0]}, you're Present!`,
                     detail,
-                    { locked: true });
+                    { locked: true, recordUrl });
 
                 $("student-id-input").value = "";
-
-                // Open the student's attendance + score record on a separate page.
-                const userId = state.session && state.session.user_id ? state.session.user_id : "";
-                const recordUrl = new URL("student-record.html", window.location.href);
-                recordUrl.searchParams.set("t", state.token);
-                recordUrl.searchParams.set("sid", data.student_id);
-                if (userId) recordUrl.searchParams.set("uid", userId);
-                const doneBtn = $("result-done");
-                if (doneBtn) {
-                    doneBtn.textContent = "View my record";
-                    doneBtn.onclick = () => { window.location.href = recordUrl.href; };
-                }
             } else if (data && data.error === "device_already_used") {
                 const owner = data.device_student_name ? `${data.device_student_name} (${data.device_student_id})` : "another student";
                 state.deviceLocked = true;
@@ -591,9 +595,11 @@
         cancelResume();
         stopScanner();
         addRecent(lock.name, lock.studentId);
+        const userId = (lock && lock.userId) || (state.session && state.session.user_id) || "";
+        const recordUrl = lock && lock.studentId ? buildStudentRecordUrl(lock.studentId, userId) : "";
         showResult("info", "This phone is already checked in",
             `${lock.name} (${lock.studentId}) was checked in from this phone. Only one check-in per phone is allowed — ask your teacher if you need help.`,
-            { locked: true });
+            { locked: true, recordUrl });
     }
 
     function addRecent(name, studentId) {
@@ -634,6 +640,13 @@
         // A locked phone has nowhere to go back to: the confirmation is the end.
         const doneBtn = $("result-done");
         if (doneBtn) doneBtn.classList.toggle("hidden", Boolean(options.locked));
+
+        const recordLink = $("result-view-record");
+        if (recordLink) {
+            const hasRecord = Boolean(options.recordUrl);
+            recordLink.classList.toggle("hidden", !hasRecord);
+            recordLink.href = hasRecord ? options.recordUrl : "#";
+        }
 
         const note = $("result-note");
         if (note) {

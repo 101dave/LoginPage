@@ -1137,4 +1137,131 @@ test("offline queue replays multiple subsection scores on the same date and cate
     assert.equal(db.grading_categories.filter(c => !c.archived).length, 2, "neither swapped category was deleted");
 });
 
+test("student scores: clearing a score deletes it from local state and cloud, and keyboard navigation moves across rows", async (t) => {
+    const { window, db, dom } = await bootMainApp({ clientOptions: { enforceGradingConstraints: true } });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    window.switchTab("scores");
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false);
+    await sleep(30);
+
+    window.openGradingSetup();
+    const row = document.querySelector("#grading-weight-rows .grading-weight-row");
+    setGradingRow(row, "Quiz", 100, 1);
+    document.getElementById("form-grading-setup").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.filter(c => c.section === "Grade 11 - STEM" && !c.archived).length === 1);
+
+    const inputs = [...document.querySelectorAll("#score-table-body .score-input")];
+    assert.ok(inputs.length >= 2, "multiple student rows rendered");
+
+    // Enter a score on row 0
+    inputs[0].value = "92";
+    inputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.some(s => s.student_id === "2026-0001" && s.score === 92));
+    assert.match(document.querySelector("#score-table-body tr:first-child .final-grade-cell").textContent, /92\.00%/);
+
+    // Keyboard navigation: ArrowDown moves focus from row 0 to row 1 in the same column
+    inputs[0].focus();
+    inputs[0].dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    assert.equal(document.activeElement, inputs[1], "ArrowDown focuses next student's score input");
+
+    // ArrowUp moves focus back from row 1 to row 0
+    inputs[1].dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+    assert.equal(document.activeElement, inputs[0], "ArrowUp focuses previous student's score input");
+
+    // Clear the score on row 0 -> deletes from db.scores and resets Final Grade cell
+    inputs[0].value = "";
+    inputs[0].dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.filter(s => s.student_id === "2026-0001").length === 0, { label: "cleared score deleted from DB" });
+    assert.match(document.querySelector("#score-table-body tr:first-child .final-grade-cell").textContent, /No scores/);
+});
+
+test("renaming a student code relinks scores and deleting a student removes their scores", async (t) => {
+    const { window, db, dom } = await bootMainApp({ clientOptions: { enforceGradingConstraints: true } });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    window.switchTab("scores");
+    await waitFor(() => document.getElementById("view-scores").classList.contains("hidden") === false);
+    await sleep(30);
+
+    window.openGradingSetup();
+    setGradingRow(document.querySelector("#grading-weight-rows .grading-weight-row"), "Quiz", 100, 1);
+    document.getElementById("form-grading-setup").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.grading_categories.length === 1);
+
+    const firstInput = document.querySelector("#score-table-body tr:first-child .score-input");
+    firstInput.value = "88";
+    firstInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => db.scores.some(s => s.student_id === "2026-0001" && s.score === 88));
+
+    // Rename Juan's student_id from 2026-0001 to 2026-0099
+    window.switchTab("directory");
+    window.openEditStudentModal("11");
+    document.getElementById("stud-id").value = "2026-0099";
+    document.getElementById("form-student").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => db.scores.some(s => s.student_id === "2026-0099" && s.score === 88), { label: "score relinked to new student_id" });
+    assert.equal(db.scores.some(s => s.student_id === "2026-0001"), false);
+
+    // Delete student 11 -> removes their scores from db.scores as well
+    window.confirmDeleteStudent("11");
+    click(window, document.getElementById("confirm-delete-btn"));
+    await waitFor(() => db.scores.filter(s => s.student_id === "2026-0099").length === 0, { label: "deleted student scores removed" });
+});
+
+test("bulk student import parses pasted rows, previews count, and syncs to Supabase; bulk QR modal renders section cards", async (t) => {
+    const { window, db, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    window.switchTab("directory");
+    window.openBulkStudentModal();
+    assert.equal(document.getElementById("form-student-bulk").classList.contains("hidden"), false, "bulk form visible");
+
+    const textarea = document.getElementById("bulk-stud-text");
+    textarea.value = [
+        "Full Name, Student ID, Email",
+        "Carlos Mendoza, 2026-0201, carlos@school.edu",
+        "Liza Soberano, 2026-0202, liza@school.edu"
+    ].join("\n");
+    window.updateBulkStudentPreview();
+    assert.match(document.getElementById("bulk-preview-count").textContent, /2 students ready/i);
+
+    document.getElementById("bulk-stud-section").value = "Grade 11 - STEM";
+    document.getElementById("form-student-bulk").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => db.students.some(s => s.student_id === "2026-0201") && db.students.some(s => s.student_id === "2026-0202"), {
+        label: "bulk imported students synced to DB"
+    });
+
+    // Open bulk section QR modal
+    window.openSectionQrModal("Grade 11 - STEM");
+    const bulkCards = document.querySelectorAll("#student-qr-bulk .bulk-qr-card-item");
+    assert.equal(bulkCards.length, 5, "all 5 STEM students rendered in bulk QR print grid");
+});
+
+test("dashboard watchlist highlights absent students and attendance sheet subtitle shows saved vs unsaved badge", async (t) => {
+    const { window, dom } = await bootMainApp();
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    // Dashboard watchlist shows Lea Reyes (marked Absent in fixture)
+    const watchlist = document.getElementById("dashboard-watchlist-container");
+    assert.ok(watchlist, "dashboard watchlist container exists");
+    assert.match(watchlist.textContent, /Lea Reyes/);
+    assert.match(watchlist.textContent, /1 Absent/);
+
+    // Quick section "Mark" button switches to Take Attendance for that section
+    window.openSectionAttendance("Grade 11 - STEM");
+    assert.equal(document.getElementById("att-section").value, "Grade 11 - STEM");
+    assert.match(document.getElementById("att-sheet-subtitle").textContent, /Saved \(3\/3 recorded\)/i);
+
+    // Switch date to tomorrow (unsaved) -> badge clearly indicates Not saved yet
+    document.getElementById("att-date").value = "2026-10-26";
+    window.loadAttendanceSheet();
+    assert.match(document.getElementById("att-sheet-subtitle").textContent, /Not saved yet/i);
+});
+
+
 

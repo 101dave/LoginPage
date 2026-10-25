@@ -16,25 +16,25 @@ let resetCooldownTimer = null;
 // PWA Install Prompt State
 let deferredPrompt = null;
 
-// Helper para i-check kung Google Chrome ang gamit
+// Helper to check if the browser supports native PWA installation
 function isGoogleChrome() {
-    const ua = navigator.userAgent;
-    const isChromium = window.chrome;
-    const isOpera = /OPR\//.test(ua);
-    const isEdge = /Edg\//.test(ua);
-    const isSamsungBrowser = /SamsungBrowser/.test(ua);
-    
-    // Siguraduhing Chromium/Chrome ito pero hindi Edge, Opera, o iba pang balat ng Chrome
-    return isChromium && !isOpera && !isEdge && !isSamsungBrowser;
+    const ua = navigator.userAgent || "";
+    return Boolean(window.chrome || /Chrome|CriOS|Edg|OPR|SamsungBrowser/i.test(ua));
+}
+
+function isStandaloneMode() {
+    return Boolean(
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+        window.navigator.standalone === true
+    );
 }
 
 window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e;
-    
-    // Ipakita lamang ang banner kung Google Chrome ang gamit at hindi pa naka-install
+
     const installBanner = document.getElementById("pwaInstallBanner");
-    if (installBanner && isGoogleChrome()) {
+    if (installBanner && !isStandaloneMode()) {
         installBanner.classList.remove("hidden");
     }
 });
