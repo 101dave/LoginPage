@@ -67,7 +67,13 @@ if (supabaseClient) {
         if (session && session.user) {
             currentUser = session.user;
         } else if (event === "SIGNED_OUT") {
+            const wasSignedIn = Boolean(currentUser);
             currentUser = null;
+            // An expired or revoked session must not leave the dashboard open
+            // on cached data, silently queueing writes that can never sync.
+            if (wasSignedIn && /main\.html/i.test(window.location.pathname)) {
+                window.location.href = "index.html";
+            }
         }
     });
 }
@@ -1811,12 +1817,31 @@ function toggleMobileMenu() {
 }
 
 async function handleLogout() {
+    // Remember the cache key before the user is cleared: it is derived from
+    // the account id.
+    const previousKey = cacheKey();
     try {
         if (supabaseClient) {
             await supabaseClient.auth.signOut();
         }
     } catch (err) {
         console.error("Sign-out error:", err);
+    }
+
+    // Shared school devices are the norm: the next teacher must not be able to
+    // read the previous one's class list, attendance and grades out of
+    // localStorage. Keep a cache only if dropping it would lose unsynced work.
+    // The unsuffixed key is included because it is what local-only sessions used
+    // to write, and it would otherwise linger on the device forever.
+    for (const key of new Set([previousKey, "scholog_app_data"])) {
+        try {
+            const pending = JSON.parse(localStorage.getItem(`${key}_pending`) || "[]");
+            if (!Array.isArray(pending) || pending.length === 0) {
+                localStorage.removeItem(key);
+            }
+        } catch (e) {
+            console.error("Could not inspect the offline queue before sign-out:", e);
+        }
     }
     localStorage.removeItem("scholog_local_user");
     // Don't leave a resumable QR check-in session behind on a shared device.
@@ -2607,8 +2632,21 @@ function handleScoreInputKeydown(event, inputEl) {
     inputEl.blur();
 }
 
+// Attendance is a closed set. Anything else (a typo, a stale cached value, a
+// restored backup edited by hand) must never reach state or the cloud — the
+// table's CHECK constraint would reject it and the offline queue would retry it
+// forever.
+const ATTENDANCE_STATUSES = new Set(["Present", "Absent", "Late", "Excused"]);
+function isValidAttendanceStatus(status) {
+    return ATTENDANCE_STATUSES.has(String(status || ""));
+}
+
 async function setStudentStatus(date, studentId, status) {
     if (!isValidDateStr(date) || !studentId) return;
+    if (!isValidAttendanceStatus(status)) {
+        console.warn("Ignored an invalid attendance status:", status);
+        return;
+    }
     const key = `${date}_${studentId}`;
     state.attendance[key] = status;
     localMutationSeq++;
@@ -3072,6 +3110,10 @@ async function saveGradingSetup(event) {
 async function markAllAttendance(status) {
     const date = document.getElementById("att-date").value;
     const sec = document.getElementById("att-section").value;
+    if (!isValidAttendanceStatus(status)) {
+        showToast("That attendance status is not valid.", "error");
+        return;
+    }
     if (!date || !sec) {
         showToast("Please create and select a section first.", "error");
         return;
@@ -3121,7 +3163,7 @@ async function saveAttendance() {
     // selected day/section (not every historical row) in one batch.
     const rows = secStudents.map(stud => {
         const key = `${date}_${stud.student_id}`;
-        if (!state.attendance[key]) state.attendance[key] = "Present";
+        if (!isValidAttendanceStatus(state.attendance[key])) state.attendance[key] = "Present";
         return { date, student_id: stud.student_id, status: state.attendance[key] };
     });
 

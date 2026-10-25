@@ -257,6 +257,9 @@ scripts/build-icon-subset.mjs         regenerates vendor/lucide-subset.js
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project
+docs/LOAD_TEST.md                     concurrency analysis + how to run the k6 test
+scripts/loadtest/k6-checkin.js        k6 harness for the check-in path (staging only)
+QA_AUDIT.md                           the 10-point QA audit: verdicts, defects, gaps
 tests/                                node:test suites
 sw.js, manifest.json                  PWA offline cache + install metadata
 vercel.json                           security + caching headers for Vercel
