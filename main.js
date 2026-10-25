@@ -369,14 +369,18 @@ function normalizeState(raw) {
             : null;
         const itemId = matchedItem?.id || value.item_id || "";
         const itemLabel = matchedItem?.label || value.item_label || "#1";
-        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, remappedId, categoryName, itemId);
+        // A score identified only by category name (legacy rows, or a category
+        // renamed after the score was saved) must still be linked to the real
+        // category, otherwise it cannot be written back to the cloud.
+        const categoryId = matchedCat?.id || remappedId || null;
+        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, categoryId, categoryName, itemId);
         scores[normalizedKey] = {
             ...value,
             date: parsed.date,
             student_id: studentId,
             subject: value.subject || gradingPeriod,
             grading_period: gradingPeriod,
-            category_id: remappedId,
+            category_id: categoryId,
             category_name: categoryName,
             category_weight: Number(value.category_weight ?? 100),
             item_id: itemId || null,
@@ -928,15 +932,62 @@ function resolveSectionForScoreRow(row) {
     return state.sections[0] || "General";
 }
 
+// Find the grading category a score belongs to, creating a harmless weight-0
+// category if the setup that produced it is gone. Losing the score would be
+// worse than showing an extra column the teacher can rename or delete.
+function resolveCategoryForScore(row) {
+    if (!row) return null;
+    const section = resolveSectionForScoreRow(row);
+    const legacy = parseLegacyScoreSubject(row.subject);
+    const name = String(row.category_name || legacy.category || "General").trim() || "General";
+
+    if (row.category_id) {
+        const byId = state.gradeCategories.find(item => item.id === row.category_id);
+        if (byId) return byId;
+    }
+
+    const byName = state.gradeCategories.find(
+        item => item.section === section && item.name.toLowerCase() === name.toLowerCase()
+    );
+    if (byName) {
+        row.category_id = byName.id;
+        row.category_name = byName.name;
+        row.category_weight = byName.weight;
+        return byName;
+    }
+
+    const carriedItem = row.item_id
+        ? [{ id: row.item_id, label: row.item_label || "#1", max_score: Number(row.max_score) > 0 ? Number(row.max_score) : 100 }]
+        : null;
+    const created = {
+        id: row.category_id || newCategoryId(),
+        section,
+        name: name.slice(0, 60),
+        weight: 0,
+        items: sanitizeCategoryItems(carriedItem, 1)
+    };
+    state.gradeCategories.push(created);
+    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
+    row.category_id = created.id;
+    row.category_name = created.name;
+    row.category_weight = 0;
+    if (!row.item_id) {
+        row.item_id = created.items[0].id;
+        row.item_label = created.items[0].label;
+    }
+    return created;
+}
+
 function scoreRowForCloud(row, uid) {
     const legacy = parseLegacyScoreSubject(row.subject);
     const gradingPeriod = row.grading_period || legacy.period;
     const categoryName = row.category_name || legacy.category;
     const studSection = resolveSectionForScoreRow(row);
     const category = state.gradeCategories.find(item => item.id === row.category_id)
-        || state.gradeCategories.find(item => item.section === studSection && item.name === categoryName);
-    const categoryId = category?.id || row.category_id;
-    if (!categoryId) throw new Error(`Set up the ${categoryName} grading category before syncing this score.`);
+        || state.gradeCategories.find(item => item.section === studSection && item.name === categoryName)
+        || resolveCategoryForScore(row);
+    const categoryId = category?.id || row.category_id || null;
+    if (!categoryId) return null;
     const matchedItem = category?.items
         ? (category.items.find(i => i.id === row.item_id)
             || ((!row.item_id || row.item_id === "item-1") ? category.items[0] : null))
@@ -1291,9 +1342,11 @@ async function applyCloudOp(op) {
             }
             break;
         }
-        case "scr": // one score with its category and grading-period metadata
-            await upsertScorePayloadWithCategoryRecovery(scoreRowForCloud(op, uid), uid, op.section || "");
+        case "scr": { // one score with its category and grading-period metadata
+            const single = scoreRowForCloud(op, uid);
+            if (single) await upsertScorePayloadWithCategoryRecovery(single, uid, op.section || "");
             break;
+        }
         case "scr-": { // delete one cleared score cell
             let q = supabaseClient.from("scores").delete()
                 .eq("user_id", uid)
@@ -1308,8 +1361,10 @@ async function applyCloudOp(op) {
         case "scrB": { // batch scores
             for (let i = 0; i < op.rows.length; i += 500) {
                 const slice = op.rows.slice(i, i + 500);
+                const rowsForCloud = slice.map(r => scoreRowForCloud(r, uid)).filter(Boolean);
+                if (rowsForCloud.length === 0) break;
                 await upsertScorePayloadWithCategoryRecovery(
-                    slice.map(r => scoreRowForCloud(r, uid)),
+                    rowsForCloud,
                     uid,
                     slice[0]?.section || op.section || ""
                 );
@@ -1521,26 +1576,16 @@ async function migrateLocalDataToCloud() {
 
 // Replace this account's cloud rows with the current state.
 // Used for first-login migration and backup restore (intentional replace semantics).
-async function pushFullStateToCloud() {
-    if (!cloudReady()) throw new Error("Not signed in to the cloud.");
-    const uid = currentUser.id;
+//
+// The whole payload is planned and validated in memory BEFORE anything is
+// deleted. A score whose grading category no longer exists gets a weight-0
+// category created for it rather than aborting the restore, so one legacy row
+// can never cost the teacher the rest of their backup.
+function buildFullStatePlan(uid) {
     ensureScoreCategories();
+    Object.values(state.scores).forEach(row => resolveCategoryForScore(row));
 
-    // Deletion order respects the data dependencies.
-    must(await supabaseClient.from("scores").delete().eq("user_id", uid));
-    must(await supabaseClient.from("section_grading_categories").delete().eq("user_id", uid));
-    must(await supabaseClient.from("grading_categories").delete().eq("user_id", uid));
-    must(await supabaseClient.from("attendance").delete().eq("user_id", uid));
-    must(await supabaseClient.from("students").delete().eq("user_id", uid));
-    must(await supabaseClient.from("sections").delete().eq("user_id", uid));
-
-    if (state.sections.length > 0) {
-        for (let i = 0; i < state.sections.length; i += 500) {
-            must(await supabaseClient.from("sections").insert(
-                state.sections.slice(i, i + 500).map(name => ({ user_id: uid, name }))
-            ));
-        }
-    }
+    const sectionRows = state.sections.map(name => ({ user_id: uid, name }));
 
     const categoryRows = state.gradeCategories.map(category => ({
         id: category.id,
@@ -1565,30 +1610,71 @@ async function pushFullStateToCloud() {
             archived: true
         });
     });
-    for (let i = 0; i < categoryRows.length; i += 500) {
-        must(await supabaseClient.from("grading_categories").insert(categoryRows.slice(i, i + 500)));
-    }
 
     const sectionCategoryRows = state.gradeCategories.map(category => ({
         user_id: uid,
         section: category.section,
         category_id: category.id
     }));
-    for (let i = 0; i < sectionCategoryRows.length; i += 500) {
-        must(await supabaseClient.from("section_grading_categories").insert(sectionCategoryRows.slice(i, i + 500)));
+
+    const studentRows = state.students.map(s => ({
+        user_id: uid,
+        student_id: s.student_id,
+        name: s.name,
+        email: s.email || null,
+        section: s.section
+    }));
+
+    const attRows = Object.keys(state.attendance).map(k => {
+        const { date, studentId } = parseAttKey(k);
+        return { user_id: uid, date, student_id: studentId, status: state.attendance[k] };
+    });
+
+    const scoreRows = dedupeScorePayload(
+        Object.values(state.scores).map(row => scoreRowForCloud(row, uid)).filter(Boolean)
+    );
+
+    return { sectionRows, categoryRows, sectionCategoryRows, studentRows, attRows, scoreRows };
+}
+
+async function pushFullStateToCloud() {
+    if (!cloudReady()) throw new Error("Not signed in to the cloud.");
+    const uid = currentUser.id;
+    const plan = buildFullStatePlan(uid);
+    const summary = {
+        sections: plan.sectionRows.length,
+        students: plan.studentRows.length,
+        attendance: plan.attRows.length,
+        scores: 0,
+        categories: plan.categoryRows.length,
+        skippedScores: 0
+    };
+
+    // Deletion order respects the data dependencies.
+    must(await supabaseClient.from("scores").delete().eq("user_id", uid));
+    must(await supabaseClient.from("section_grading_categories").delete().eq("user_id", uid));
+    must(await supabaseClient.from("grading_categories").delete().eq("user_id", uid));
+    must(await supabaseClient.from("attendance").delete().eq("user_id", uid));
+    must(await supabaseClient.from("students").delete().eq("user_id", uid));
+    must(await supabaseClient.from("sections").delete().eq("user_id", uid));
+
+    for (let i = 0; i < plan.sectionRows.length; i += 500) {
+        must(await supabaseClient.from("sections").insert(plan.sectionRows.slice(i, i + 500)));
     }
 
-    if (state.students.length > 0) {
+    for (let i = 0; i < plan.categoryRows.length; i += 500) {
+        must(await supabaseClient.from("grading_categories").insert(plan.categoryRows.slice(i, i + 500)));
+    }
+
+    for (let i = 0; i < plan.sectionCategoryRows.length; i += 500) {
+        must(await supabaseClient.from("section_grading_categories").insert(plan.sectionCategoryRows.slice(i, i + 500)));
+    }
+
+    if (plan.studentRows.length > 0) {
         const idByCode = {};
-        for (let i = 0; i < state.students.length; i += 500) {
+        for (let i = 0; i < plan.studentRows.length; i += 500) {
             const { data, error } = await supabaseClient.from("students").insert(
-                state.students.slice(i, i + 500).map(s => ({
-                    user_id: uid,
-                    student_id: s.student_id,
-                    name: s.name,
-                    email: s.email || null,
-                    section: s.section
-                }))
+                plan.studentRows.slice(i, i + 500)
             ).select("id, student_id");
             if (error) throw error;
             (data || []).forEach(r => { idByCode[r.student_id] = String(r.id); });
@@ -1600,18 +1686,32 @@ async function pushFullStateToCloud() {
         });
     }
 
-    const attRows = Object.keys(state.attendance).map(k => {
-        const { date, studentId } = parseAttKey(k);
-        return { user_id: uid, date, student_id: studentId, status: state.attendance[k] };
-    });
-    for (let i = 0; i < attRows.length; i += 500) {
-        must(await supabaseClient.from("attendance").insert(attRows.slice(i, i + 500)));
+    for (let i = 0; i < plan.attRows.length; i += 500) {
+        must(await supabaseClient.from("attendance").insert(plan.attRows.slice(i, i + 500)));
     }
 
-    const scoreRows = Object.values(state.scores).map(row => scoreRowForCloud(row, uid));
-    for (let i = 0; i < scoreRows.length; i += 500) {
-        must(await supabaseClient.from("scores").insert(scoreRows.slice(i, i + 500)));
+    for (let i = 0; i < plan.scoreRows.length; i += 500) {
+        const batch = plan.scoreRows.slice(i, i + 500);
+        try {
+            must(await supabaseClient.from("scores").insert(batch));
+            summary.scores += batch.length;
+        } catch (batchErr) {
+            // Fall back to one row at a time so a single unusable row cannot
+            // take the rest of the scores down with it.
+            console.error("Score batch insert failed, retrying row by row:", batchErr);
+            for (const row of batch) {
+                try {
+                    must(await supabaseClient.from("scores").insert([row]));
+                    summary.scores += 1;
+                } catch (rowErr) {
+                    summary.skippedScores += 1;
+                    console.error("Skipped one score while restoring:", rowErr, row);
+                }
+            }
+        }
     }
+
+    return summary;
 }
 
 function setProfileUI(email, name, avatarUrl) {
@@ -4116,8 +4216,13 @@ function importDataBackup(e) {
                 if (cloudReady()) {
                     showToast("Restoring backup to your account...", "success");
                     try {
-                        await pushFullStateToCloud();
-                        showToast("Backup restored and synced to the cloud!", "success");
+                        const restored = await pushFullStateToCloud();
+                        const counts = `${restored.students} students, ${restored.attendance} attendance records, ${restored.scores} scores`;
+                        if (restored.skippedScores > 0) {
+                            showToast(`Backup restored with ${counts}. ${restored.skippedScores} score(s) could not be saved — they are still in your backup file and local copy.`, "error");
+                        } else {
+                            showToast(`Backup restored: ${counts}.`, "success");
+                        }
                     } catch (err) {
                         reportDbError("restoring backup", err);
                     }

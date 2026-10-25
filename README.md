@@ -109,6 +109,28 @@ scores carry grading-period, category, and subsection metadata and
   and are the only thing `anon` can execute — the class list, attendance and sessions
   stay unreadable without a teacher login.
 
+## Backup & restore
+
+**Profile → Backup Data** downloads the whole account as one JSON file
+(`Scholog_Backup_<date>.json`): sections, students, attendance, scores **and**
+the per-section grading categories. **Restore Data** replaces the account with
+that file (cloud + local cache) and reports exactly what came back, e.g.
+*"Backup restored: 4 students, 3 attendance records, 12 scores."*
+
+Two guarantees worth knowing after a restore:
+
+- A score is never dropped because its grading category was renamed or deleted.
+  Restore re-links it to the matching category by name, and when no category
+  exists at all it creates a **weight-0** one (visible in *Categories & Weights*,
+  so the teacher can name it or give it a weight) instead of failing.
+- The whole payload is planned and validated **before** the cloud rows are
+  deleted, and a failing score batch is retried one row at a time. Previously a
+  single legacy score aborted the restore after students and attendance had
+  been written — leaving the account with no scores at all.
+
+If a restore is interrupted by a dropped connection, the same backup file can be
+restored again: restoring is a full replace, never a merge.
+
 ## Local development
 
 ```bash
@@ -121,7 +143,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # 59 UI/PDF/static checks (jsdom, no network)
+npm test                  # UI/PDF/backup/SMS/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
@@ -129,8 +151,9 @@ The suite loads the real HTML/CSS/JS in jsdom with stubbed libraries and covers:
 authentication flows, dashboard/class list rendering, all four attendance statuses,
 attendance saving and cloud conflict targets, daily PDF content, removal of the
 Monthly SF2 export and dark mode, student QR cards, the standalone check-in page
-(QR scan, typed ID, invalid/closed/expired sessions, host mode, live roster) and
-asset/offline-cache consistency.
+(QR scan, typed ID, invalid/closed/expired sessions, host mode, live roster),
+backup/restore round trips (including legacy scores with no grading category),
+and asset/offline-cache consistency.
 
 ## Deploying to Vercel
 
@@ -153,6 +176,7 @@ public client credentials, protected by Row Level Security).
 ```
 index.html, script.js, style.css      auth UI
 main.html, main.js, main.css, pdf.js  teacher app + daily PDF builder
+sms.js                                guardian-SMS helpers (encoding, cost, rules)
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project
