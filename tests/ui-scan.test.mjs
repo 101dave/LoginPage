@@ -728,4 +728,79 @@ test("smart live projector QR: auto-late grace timer, live check-in feed & pop-u
     assert.match(sDoc.getElementById("result-title").textContent, /marked Late/i);
 });
 
+test("standalone student QR scanner on student-record.html works without a shared teacher QR link and shows scores and attendance", async (t) => {
+    let lookupCam = null;
+    const rpcCalls = [];
+    const recordPage = loadPage({
+        html: "student-record.html",
+        scripts: ["student-record.js"],
+        url: "https://scholog.test/student-record.html",
+        beforeParse(win) {
+            installLucideStub(win);
+            lookupCam = installCameraStub(win);
+            win.fetch = async (url, init = {}) => {
+                const fn = String(url).split("/rpc/")[1];
+                const body = init.body ? JSON.parse(init.body) : null;
+                rpcCalls.push({ fn, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    text: async () => JSON.stringify({
+                        ok: true,
+                        student_name: "Allan Dave E Ebale",
+                        student_id: "12345678",
+                        section: "1-A",
+                        checked_in_now: true,
+                        checkin_status: "Present",
+                        checkin_date: "2026-10-25",
+                        attendance: [
+                            { date: "2026-10-25", status: "Present", subject: "General" }
+                        ],
+                        categories: [
+                            { id: "c1", name: "MIDTERM", weight: 100, items: [{ id: "i1", label: "#1", max_score: 100 }] }
+                        ],
+                        scores: [
+                            {
+                                date: "2026-10-25",
+                                grading_period: "Quarter 1",
+                                category_id: "c1",
+                                category_name: "MIDTERM",
+                                category_weight: 100,
+                                item_id: "i1",
+                                item_label: "#1",
+                                score: 95,
+                                max_score: 100,
+                                pct: 95
+                            }
+                        ]
+                    })
+                };
+            };
+        }
+    });
+    t.after(() => recordPage.dom.window.close());
+    const doc = recordPage.window.document;
+
+    // Opens directly into #view-lookup (camera QR scanner) when no student_id is in the URL
+    await waitFor(() => !doc.getElementById("view-lookup").classList.contains("hidden"));
+    await waitFor(() => lookupCam.callbacks.length > 0, { label: "lookup camera started" });
+
+    // Student scans their printed QR card (SCHOLOG:12345678) without any session token link
+    lookupCam.callbacks[0]("SCHOLOG:12345678");
+
+    await waitFor(() => !doc.getElementById("view-record").classList.contains("hidden"), { label: "record rendered after QR scan" });
+    assert.equal(rpcCalls.length, 1);
+    assert.equal(rpcCalls[0].fn, "get_student_record");
+    assert.equal(rpcCalls[0].body.p_student_id, "12345678");
+    assert.equal(rpcCalls[0].body.p_user_id, null);
+
+    assert.equal(doc.getElementById("record-student-name").textContent, "Allan Dave E Ebale");
+    assert.equal(doc.getElementById("record-checkin-banner").classList.contains("hidden"), false);
+    assert.match(doc.getElementById("record-checkin-banner").textContent, /Attendance marked Present/i);
+    assert.match(doc.getElementById("record-grade-summary-body").textContent, /95\.00%/);
+    assert.equal(doc.querySelectorAll("#record-scores-body tr").length, 1);
+    assert.equal(doc.querySelectorAll("#record-attendance-body tr").length, 1);
+});
+
+
 

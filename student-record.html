@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scholog — My Attendance Record</title>
-    <meta name="description" content="View your attendance history and scores.">
+    <title>Scholog — My Attendance &amp; Score Record</title>
+    <meta name="description" content="Scan your student QR code or enter your Student ID to view your attendance history and scores.">
     <meta name="robots" content="noindex, nofollow">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Scholog">
-    <meta property="og:title" content="Scholog — My Attendance Record">
-    <meta property="og:description" content="View your attendance history and scores.">
+    <meta property="og:title" content="Scholog — My Attendance &amp; Score Record">
+    <meta property="og:description" content="Scan your student QR code or enter your Student ID to view your attendance history and scores.">
     <meta name="theme-color" content="#f8fafc">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
@@ -28,6 +28,7 @@
                 </div>
             </a>
             <div class="scan-header-actions">
+                <button type="button" class="btn btn-ghost btn-sm hidden" id="scanAnotherBtn">Scan QR</button>
                 <a href="scan.html" class="btn btn-ghost btn-sm" id="backToScanBtn">Check in again</a>
             </div>
         </div>
@@ -41,12 +42,88 @@
             <p class="muted">Loading your record…</p>
         </section>
 
+        <!-- Standalone Student QR Scanner & ID Lookup (works without a shared teacher QR link) -->
+        <section id="view-lookup" class="hidden">
+            <div class="class-strip">
+                <div class="class-strip-text">
+                    <div class="class-strip-top">
+                        <span class="badge">Student Portal</span>
+                        <span class="class-strip-label">No link or login needed</span>
+                    </div>
+                    <h2>Scan Your Student QR</h2>
+                    <p class="muted">Scan your printed QR card, upload a saved QR photo, or enter your Student ID to view your scores &amp; attendance.</p>
+                </div>
+            </div>
+
+            <div class="segmented" role="tablist" aria-label="Choose how to open your record">
+                <button type="button" id="lookup-tab-scan" class="seg-btn active" role="tab"
+                        aria-selected="true" aria-controls="lookup-panel-scan">
+                    <span class="seg-icon" aria-hidden="true">▣</span> Scan QR
+                </button>
+                <button type="button" id="lookup-tab-id" class="seg-btn" role="tab"
+                        aria-selected="false" aria-controls="lookup-panel-id" tabindex="-1">
+                    <span class="seg-icon" aria-hidden="true">⌨</span> Type ID
+                </button>
+            </div>
+
+            <!-- Panel: Camera / Photo QR Scan -->
+            <div id="lookup-panel-scan" class="panel panel-scan" role="tabpanel" aria-labelledby="lookup-tab-scan">
+                <div class="scan-stage" id="lookup-scan-stage">
+                    <div id="lookup-qr-reader" class="qr-reader" aria-label="Camera QR scanner"></div>
+
+                    <div class="scan-placeholder" id="lookup-scan-placeholder">
+                        <div class="scan-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                                <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                                <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                                <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
+                            </svg>
+                        </div>
+                        <p class="scan-placeholder-title">Scan your Student QR Card</p>
+                        <p class="scan-placeholder-text">Point the camera at your QR card, or upload a QR photo from your gallery.</p>
+                        <button type="button" class="btn btn-primary btn-lg" id="lookupStartScanBtn">Turn on camera</button>
+                    </div>
+
+                    <div class="scan-live-note hidden" id="lookup-scan-live-note">Point the camera at your Student QR code</div>
+                </div>
+
+                <p class="hint" id="lookup-camera-hint">Hold your Student QR card steady inside the frame, or choose a saved QR image below.</p>
+
+                <input type="file" id="lookup-qr-file" accept="image/*" class="hidden" aria-label="Upload QR code image">
+                <div id="lookup-qr-file-scratch" class="hidden" aria-hidden="true"></div>
+
+                <div class="btn-row">
+                    <button type="button" class="btn btn-secondary hidden" id="lookupStopScanBtn">Turn off camera</button>
+                    <button type="button" class="btn btn-secondary" id="lookupQrFileBtn">Upload QR Photo</button>
+                    <button type="button" class="btn btn-ghost" id="lookupUseIdBtn">Type my ID instead</button>
+                </div>
+            </div>
+
+            <!-- Panel: Typed Student ID -->
+            <div id="lookup-panel-id" class="panel hidden" role="tabpanel" aria-labelledby="lookup-tab-id">
+                <h3 class="panel-title">Enter your Student ID</h3>
+                <p class="muted">Type the Student ID printed on your QR card or class list to view your scores and attendance.</p>
+                <form id="lookup-id-form" class="id-form" autocomplete="off">
+                    <label for="lookup-id-input" class="sr-only-label">Student ID</label>
+                    <input type="text" id="lookup-id-input" name="student_id" placeholder="e.g. 12345678"
+                           inputmode="text" autocapitalize="characters" spellcheck="false"
+                           autocomplete="off" maxlength="64" required>
+                    <button type="submit" class="btn btn-primary btn-block btn-lg" id="lookupSubmitBtn">View My Score &amp; Attendance</button>
+                </form>
+                <p class="hint">If your teacher has an open check-in session for your section today, checking your record also marks your attendance automatically.</p>
+                <button type="button" class="btn btn-ghost btn-block" id="lookupUseScanBtn">I have a QR code instead</button>
+            </div>
+        </section>
+
         <!-- Not found / error -->
         <section id="view-notfound" class="hidden panel panel-center">
             <div class="result-icon result-icon-error" aria-hidden="true">!</div>
             <h2 id="notfound-title">Record not found</h2>
             <p class="muted" id="notfound-text"></p>
             <div class="btn-row">
+                <button type="button" class="btn btn-primary" id="notfound-scan-btn">Scan QR / Try Another ID</button>
                 <a class="btn btn-secondary" href="index.html">Back to Scholog</a>
             </div>
         </section>
@@ -58,12 +135,14 @@
                 <div class="class-strip-text">
                     <div class="class-strip-top">
                         <span class="badge" id="record-section-badge">—</span>
-                        <span class="class-strip-label">Your attendance record</span>
+                        <span class="class-strip-label">Your attendance &amp; score record</span>
                     </div>
                     <h2 id="record-student-name">Student</h2>
                     <p class="muted" id="record-student-id">Student ID: —</p>
                 </div>
             </div>
+
+            <div id="record-checkin-banner" class="smart-timer-banner timer-ontime hidden" role="status" aria-live="polite"></div>
 
             <!-- Attendance overview counters -->
             <div class="host-stats record-att-stats" id="record-attendance-summary">
@@ -140,6 +219,7 @@
     </footer>
 
     <script src="vendor/supabase.js"></script>
+    <script src="vendor/html5-qrcode.min.js"></script>
     <script src="student-record.js"></script>
 </body>
 </html>

@@ -1653,7 +1653,15 @@
 
     async function init() {
         wireEvents();
+        const params = new URLSearchParams(window.location.search);
+        const directStudentId = (params.get("id") || params.get("student_id") || params.get("sid") || "").trim();
         const token = getTokenFromUrl();
+        if (!token && directStudentId) {
+            const target = new URL("student-record.html", window.location.href);
+            target.searchParams.set("student_id", directStudentId);
+            window.location.href = target.href;
+            return;
+        }
         if (token) {
             await startStudentMode(token);
         } else {
