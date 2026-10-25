@@ -139,6 +139,40 @@ class QueryBuilder {
 
         if (this.op === "upsert") {
             const input = Array.isArray(this.payload) ? this.payload : [this.payload];
+            if (client.enforceGradingConstraints) {
+                if (this.table === "grading_categories") {
+                    for (const row of input) {
+                        const clash = table.find(
+                            (candidate) => candidate.user_id === row.user_id
+                                && candidate.name === row.name
+                                && candidate.id !== row.id
+                        );
+                        if (clash) {
+                            return {
+                                data: null,
+                                error: {
+                                    code: "23505",
+                                    message: 'duplicate key value violates unique constraint "grading_categories_user_id_name_key"'
+                                }
+                            };
+                        }
+                    }
+                }
+                if (this.table === "scores") {
+                    const cats = client.db.grading_categories || [];
+                    for (const row of input) {
+                        if (!row.category_id || !cats.some((c) => c.id === row.category_id)) {
+                            return {
+                                data: null,
+                                error: {
+                                    code: "23503",
+                                    message: 'insert or update on table "scores" violates foreign key constraint "scores_category_id_fkey"'
+                                }
+                            };
+                        }
+                    }
+                }
+            }
             const conflict = (this.options && this.options.onConflict ? this.options.onConflict.split(",") : [])
                 .map((c) => c.trim()).filter(Boolean);
             const out = [];
@@ -182,6 +216,7 @@ export function createFakeSupabase(options = {}) {
         calls: [],
         session: options.session === undefined ? { user: testUser() } : options.session,
         failTable: options.failTable || null,
+        enforceGradingConstraints: Boolean(options.enforceGradingConstraints),
         nextToken: options.nextToken || "11111111-2222-4333-8444-555555555555",
         authHandlers: [],
         authErrors: options.authErrors || {},

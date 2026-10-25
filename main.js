@@ -307,8 +307,24 @@ async function checkAuth() {
                 const displayName = session.user.user_metadata?.full_name || session.user.email.split("@")[0];
                 currentAvatar = session.user.user_metadata?.avatar_url || "";
                 setProfileUI(session.user.email, displayName, currentAvatar);
-                await loadSupabaseData();
-                await flushPendingOps(); // replay changes made while offline
+                const pendingBefore = readPendingOps();
+                if (pendingBefore.length > 0) {
+                    const hadLocalCache = Boolean(localStorage.getItem(cacheKey()));
+                    loadLocalStore();
+                    applyPendingOpsToLocalState(pendingBefore);
+                    await flushPendingOps();
+                    const pendingAfter = readPendingOps();
+                    if (pendingAfter.length === 0) {
+                        if (!cloudHasData && state.sections.length === 0 && state.students.length === 0 && Object.keys(state.scores).length === 0) {
+                            await loadSupabaseData();
+                        }
+                    } else {
+                        if (!hadLocalCache) await loadSupabaseData();
+                        applyPendingOpsToLocalState(pendingAfter);
+                    }
+                } else {
+                    await loadSupabaseData();
+                }
                 await migrateLocalDataToCloud();
                 saveLocalStore(); // cache cloud data locally so the app still opens offline
                 return;
@@ -395,12 +411,14 @@ async function fetchCloudState() {
     ]);
 
     // Newer grading tables are optional while an older deployment is being migrated.
-    let scData = [];
-    let categoryData = [];
-    let sectionCategoryData = [];
-    try { scData = await fetchAll("scores", currentUser.id); } catch (err) { /* ignore */ }
-    try { categoryData = await fetchAll("grading_categories", currentUser.id); } catch (err) { /* ignore */ }
-    try { sectionCategoryData = await fetchAll("section_grading_categories", currentUser.id); } catch (err) { /* ignore */ }
+    const [scRes, catRes, secCatRes] = await Promise.allSettled([
+        fetchAll("scores", currentUser.id),
+        fetchAll("grading_categories", currentUser.id),
+        fetchAll("section_grading_categories", currentUser.id)
+    ]);
+    const scData = scRes.status === "fulfilled" ? scRes.value : [];
+    const categoryData = catRes.status === "fulfilled" ? catRes.value : [];
+    const sectionCategoryData = secCatRes.status === "fulfilled" ? secCatRes.value : [];
 
     const sections = secData.map(s => s.name);
     const students = studData.map(s => ({
@@ -478,14 +496,126 @@ async function loadSupabaseData() {
 // connection), the operation is queued and replayed automatically on reconnect
 // or next load, so offline work is never silently lost.
 
+function readPendingOps() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(pendingKey()) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function applyScoreOpToLocalState(row) {
+    if (!row || !isValidDateStr(row.date) || !row.student_id) return;
+    const legacy = parseLegacyScoreSubject(row.subject);
+    const gradingPeriod = row.grading_period || legacy.period;
+    const categoryName = row.category_name || legacy.category;
+    const categoryId = row.category_id || null;
+    const categoryWeight = Number(row.category_weight ?? 100);
+    if (categoryId && categoryName && !state.gradeCategories.some(item => item.id === categoryId)) {
+        const sameName = state.gradeCategories.find(item => item.name.toLowerCase() === String(categoryName).toLowerCase());
+        if (!sameName) {
+            state.gradeCategories.push({
+                id: String(categoryId),
+                name: String(categoryName).trim(),
+                weight: Number.isFinite(categoryWeight) ? Math.min(Math.max(categoryWeight, 0), 100) : 0
+            });
+        }
+    }
+    const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName);
+    state.scores[key] = {
+        score: Number(row.score),
+        max_score: Number(row.max_score ?? 100),
+        date: row.date,
+        student_id: row.student_id,
+        subject: gradingPeriod,
+        grading_period: gradingPeriod,
+        category_id: categoryId,
+        category_name: categoryName,
+        category_weight: Number.isFinite(categoryWeight) ? categoryWeight : 100
+    };
+}
+
+// Re-apply queued offline operations onto in-memory state so unsynced changes
+// remain visible and cached even if a page reload happens before sync finishes.
+function applyPendingOpsToLocalState(ops) {
+    if (!Array.isArray(ops) || ops.length === 0) return;
+    for (const op of ops) {
+        if (!op || typeof op !== "object") continue;
+        switch (op.t) {
+            case "att":
+                if (isValidDateStr(op.date) && op.student_id && op.status) {
+                    state.attendance[`${op.date}_${op.student_id}`] = op.status;
+                }
+                break;
+            case "attB":
+                (op.rows || []).forEach(r => {
+                    if (r && isValidDateStr(r.date) && r.student_id && r.status) {
+                        state.attendance[`${r.date}_${r.student_id}`] = r.status;
+                    }
+                });
+                break;
+            case "gradingConfig":
+                if (Array.isArray(op.categories)) {
+                    state.gradeCategories = sanitizeGradeCategories(op.categories);
+                    if (op.section) {
+                        state.sectionGradeCategories[op.section] = [...new Set((op.selectedIds || []).map(String))];
+                    }
+                    refreshScoreCategoryMetadata(state.gradeCategories);
+                }
+                break;
+            case "scr":
+                applyScoreOpToLocalState(op);
+                break;
+            case "scrB":
+                (op.rows || []).forEach(r => applyScoreOpToLocalState(r));
+                break;
+            case "sec+":
+                if (op.name && !state.sections.includes(op.name)) state.sections.push(op.name);
+                break;
+            case "stu+":
+                if (op.student_id && op.name) {
+                    const existing = state.students.find(s => s.student_id === op.student_id);
+                    if (existing) {
+                        existing.name = op.name;
+                        existing.email = op.email || "";
+                        existing.section = op.section || existing.section;
+                    } else {
+                        state.students.push({
+                            id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                            student_id: op.student_id,
+                            name: op.name,
+                            email: op.email || "",
+                            section: op.section || ""
+                        });
+                    }
+                    if (op.section && !state.sections.includes(op.section)) state.sections.push(op.section);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 function queueOp(op) {
     try {
         const key = pendingKey();
-        const q = JSON.parse(localStorage.getItem(key) || "[]");
+        const q = readPendingOps();
         let out = q;
         // Keep only the latest attendance status per student+date
         if (op.t === "att") {
             out = q.filter(e => !(e.t === "att" && e.date === op.date && e.student_id === op.student_id));
+        } else if (op.t === "scr") {
+            out = q.filter(e => !(
+                e.t === "scr"
+                && e.date === op.date
+                && e.student_id === op.student_id
+                && e.grading_period === op.grading_period
+                && e.category_id === op.category_id
+            ));
+        } else if (op.t === "gradingConfig") {
+            out = q.filter(e => !(e.t === "gradingConfig" && e.section === op.section));
         }
         out.push(op);
         localStorage.setItem(key, JSON.stringify(out));
@@ -554,6 +684,238 @@ function scoreRowForCloud(row, uid) {
     };
 }
 
+function isMissingCategoryFkError(error) {
+    const code = String(error?.code || "");
+    const msg = `${error?.message || ""} ${error?.details || ""}`;
+    return code === "23503" || /scores_category_id_fkey|grading_categories/i.test(msg);
+}
+
+// Reconcile a client-created category UUID with an existing cloud category of
+// the same name (for example, a migration-backfilled "General" category) so
+// unique(user_id, name) never blocks offline replay and historical scores
+// re-link cleanly to the client category ID.
+async function reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp) {
+    const targetNameKey = String(category.name || "").trim().toLowerCase();
+    const migratingPrefix = `__migrating_${category.id}_`;
+    const clashIndex = existingCategories.findIndex(
+        row => row.id !== category.id && (
+            String(row.name || "").trim().toLowerCase() === targetNameKey
+            || String(row.name || "").startsWith(migratingPrefix)
+        )
+    );
+    if (clashIndex === -1) return;
+
+    const clash = existingCategories[clashIndex];
+    const targetExists = existingCategories.some(row => row.id === category.id);
+
+    must(await supabaseClient.from("grading_categories")
+        .update({ name: `${migratingPrefix}${clash.id}`, updated_at: timestamp })
+        .eq("user_id", uid)
+        .eq("id", clash.id));
+
+    must(await supabaseClient.from("grading_categories").upsert({
+        id: category.id,
+        user_id: uid,
+        name: category.name,
+        weight: category.weight,
+        updated_at: timestamp
+    }, { onConflict: "id" }));
+
+    if (targetExists) {
+        const { data: targetScores, error: targetErr } = await supabaseClient
+            .from("scores")
+            .select("date, student_id, grading_period")
+            .eq("user_id", uid)
+            .eq("category_id", category.id);
+        if (targetErr) throw targetErr;
+        if (targetScores && targetScores.length > 0) {
+            const { data: clashScores, error: clashErr } = await supabaseClient
+                .from("scores")
+                .select("id, date, student_id, grading_period")
+                .eq("user_id", uid)
+                .eq("category_id", clash.id);
+            if (clashErr) throw clashErr;
+            const targetKeys = new Set(targetScores.map(r => `${r.date}|${r.student_id}|${r.grading_period}`));
+            const duplicateIds = (clashScores || [])
+                .filter(r => targetKeys.has(`${r.date}|${r.student_id}|${r.grading_period}`))
+                .map(r => r.id);
+            if (duplicateIds.length > 0) {
+                must(await supabaseClient.from("scores").delete().eq("user_id", uid).in("id", duplicateIds));
+            }
+        }
+    }
+
+    must(await supabaseClient.from("scores").update({
+        category_id: category.id,
+        category_name: category.name,
+        category_weight: category.weight
+    }).eq("user_id", uid).eq("category_id", clash.id));
+
+    const { data: clashSecRows, error: secErr } = await supabaseClient
+        .from("section_grading_categories")
+        .select("section")
+        .eq("user_id", uid)
+        .eq("category_id", clash.id);
+    if (secErr) throw secErr;
+    must(await supabaseClient.from("section_grading_categories")
+        .delete()
+        .eq("user_id", uid)
+        .eq("category_id", clash.id));
+    if (clashSecRows && clashSecRows.length > 0) {
+        const uniqueSections = [...new Set(clashSecRows.map(r => r.section).filter(Boolean))];
+        if (uniqueSections.length > 0) {
+            must(await supabaseClient.from("section_grading_categories").upsert(
+                uniqueSections.map(section => ({ user_id: uid, section, category_id: category.id })),
+                { onConflict: "user_id,section,category_id" }
+            ));
+        }
+    }
+
+    must(await supabaseClient.from("grading_categories")
+        .delete()
+        .eq("user_id", uid)
+        .eq("id", clash.id));
+
+    existingCategories.splice(clashIndex, 1);
+    if (!targetExists) {
+        existingCategories.push({
+            id: category.id,
+            user_id: uid,
+            name: category.name,
+            weight: category.weight
+        });
+    }
+}
+
+async function upsertScorePayloadWithCategoryRecovery(payload, uid) {
+    const conflictOpts = { onConflict: "user_id,date,student_id,grading_period,category_id" };
+    const firstAttempt = await supabaseClient.from("scores").upsert(payload, conflictOpts);
+    if (!firstAttempt || !firstAttempt.error) return firstAttempt;
+    if (!isMissingCategoryFkError(firstAttempt.error)) throw firstAttempt.error;
+
+    const rows = Array.isArray(payload) ? payload : [payload];
+    const neededMap = new Map();
+    rows.forEach(row => {
+        if (!row.category_id || neededMap.has(row.category_id)) return;
+        const weight = Number(row.category_weight ?? 0);
+        neededMap.set(row.category_id, {
+            id: row.category_id,
+            name: String(row.category_name || "General").trim() || "General",
+            weight: Number.isFinite(weight) ? Math.min(Math.max(weight, 0), 100) : 0
+        });
+    });
+
+    const timestamp = new Date().toISOString();
+    const existingCategories = await fetchAll("grading_categories", uid);
+
+    // If the account only had an auto-backfilled "General" (100%) category and
+    // offline score rows are restoring distinct categories, zero out the
+    // backfilled placeholder weight so global weights do not jump above 100%.
+    const hasNonGeneralRecovery = [...neededMap.values()].some(
+        c => c.name.toLowerCase() !== "general" && c.weight > 0
+    );
+    if (
+        hasNonGeneralRecovery
+        && existingCategories.length === 1
+        && String(existingCategories[0].name || "").trim().toLowerCase() === "general"
+        && Number(existingCategories[0].weight) === 100
+        && !neededMap.has(existingCategories[0].id)
+    ) {
+        const backfilled = existingCategories[0];
+        must(await supabaseClient.from("section_grading_categories")
+            .delete()
+            .eq("user_id", uid)
+            .eq("category_id", backfilled.id));
+        must(await supabaseClient.from("grading_categories")
+            .update({ weight: 0, updated_at: timestamp })
+            .eq("user_id", uid)
+            .eq("id", backfilled.id));
+        backfilled.weight = 0;
+    }
+
+    for (const category of neededMap.values()) {
+        await reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp);
+        if (!existingCategories.some(row => row.id === category.id)) {
+            must(await supabaseClient.from("grading_categories").upsert({
+                id: category.id,
+                user_id: uid,
+                name: category.name,
+                weight: category.weight,
+                updated_at: timestamp
+            }, { onConflict: "id" }));
+            existingCategories.push({ ...category, user_id: uid });
+        }
+    }
+
+    return must(await supabaseClient.from("scores").upsert(payload, conflictOpts));
+}
+
+async function syncGradingConfigToCloud(op, uid) {
+    const timestamp = new Date().toISOString();
+    const existingCategories = await fetchAll("grading_categories", uid);
+
+    for (const category of op.categories) {
+        await reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp);
+    }
+
+    for (let i = 0; i < op.categories.length; i += 500) {
+        must(await supabaseClient.from("grading_categories").upsert(
+            op.categories.slice(i, i + 500).map(category => ({
+                id: category.id,
+                user_id: uid,
+                name: category.name,
+                weight: category.weight,
+                updated_at: timestamp
+            })),
+            { onConflict: "id" }
+        ));
+    }
+    for (const category of op.categories) {
+        must(await supabaseClient.from("scores").update({
+            category_name: category.name,
+            category_weight: category.weight
+        }).eq("user_id", uid).eq("category_id", category.id));
+    }
+    must(await supabaseClient.from("section_grading_categories").delete()
+        .eq("user_id", uid).eq("section", op.section));
+    if (op.selectedIds.length > 0) {
+        must(await supabaseClient.from("section_grading_categories").insert(
+            op.selectedIds.map(categoryId => ({ user_id: uid, section: op.section, category_id: categoryId }))
+        ));
+    }
+
+    // Retire categories not present in the saved global list (such as an
+    // auto-backfilled "General" category after a teacher configures custom
+    // categories): drop unused ones and zero out weight on any still referenced
+    // by historical score rows so global totals stay at 100%.
+    const activeIds = new Set(op.categories.map(category => category.id));
+    for (const stale of existingCategories) {
+        if (activeIds.has(stale.id)) continue;
+        must(await supabaseClient.from("section_grading_categories")
+            .delete()
+            .eq("user_id", uid)
+            .eq("category_id", stale.id));
+        const { data: linkedScores, error: scoreErr } = await supabaseClient
+            .from("scores")
+            .select("id")
+            .eq("user_id", uid)
+            .eq("category_id", stale.id)
+            .range(0, 0);
+        if (scoreErr) throw scoreErr;
+        if (!linkedScores || linkedScores.length === 0) {
+            must(await supabaseClient.from("grading_categories")
+                .delete()
+                .eq("user_id", uid)
+                .eq("id", stale.id));
+        } else if (Number(stale.weight) !== 0) {
+            must(await supabaseClient.from("grading_categories")
+                .update({ weight: 0, updated_at: timestamp })
+                .eq("user_id", uid)
+                .eq("id", stale.id));
+        }
+    }
+}
+
 async function applyCloudOp(op) {
     const uid = currentUser.id;
     switch (op.t) {
@@ -573,48 +935,20 @@ async function applyCloudOp(op) {
             break;
         }
         case "scr": // one score with its category and grading-period metadata
-            must(await supabaseClient.from("scores").upsert(
-                scoreRowForCloud(op, uid),
-                { onConflict: "user_id,date,student_id,grading_period,category_id" }
-            ));
+            await upsertScorePayloadWithCategoryRecovery(scoreRowForCloud(op, uid), uid);
             break;
         case "scrB": { // batch scores
             for (let i = 0; i < op.rows.length; i += 500) {
-                must(await supabaseClient.from("scores")
-                    .upsert(op.rows.slice(i, i + 500).map(r => scoreRowForCloud(r, uid)),
-                        { onConflict: "user_id,date,student_id,grading_period,category_id" }));
+                await upsertScorePayloadWithCategoryRecovery(
+                    op.rows.slice(i, i + 500).map(r => scoreRowForCloud(r, uid)),
+                    uid
+                );
             }
             break;
         }
-        case "gradingConfig": { // global categories + one section's selected category IDs
-            const timestamp = new Date().toISOString();
-            for (let i = 0; i < op.categories.length; i += 500) {
-                must(await supabaseClient.from("grading_categories").upsert(
-                    op.categories.slice(i, i + 500).map(category => ({
-                        id: category.id,
-                        user_id: uid,
-                        name: category.name,
-                        weight: category.weight,
-                        updated_at: timestamp
-                    })),
-                    { onConflict: "id" }
-                ));
-            }
-            for (const category of op.categories) {
-                must(await supabaseClient.from("scores").update({
-                    category_name: category.name,
-                    category_weight: category.weight
-                }).eq("user_id", uid).eq("category_id", category.id));
-            }
-            must(await supabaseClient.from("section_grading_categories").delete()
-                .eq("user_id", uid).eq("section", op.section));
-            if (op.selectedIds.length > 0) {
-                must(await supabaseClient.from("section_grading_categories").insert(
-                    op.selectedIds.map(categoryId => ({ user_id: uid, section: op.section, category_id: categoryId }))
-                ));
-            }
+        case "gradingConfig": // global categories + one section's selected category IDs
+            await syncGradingConfigToCloud(op, uid);
             break;
-        }
         case "att-": // remove one student's attendance history
             must(await supabaseClient.from("attendance").delete()
                 .eq("user_id", uid).eq("student_id", op.student_id));
@@ -706,6 +1040,7 @@ async function flushPendingOps() {
         if (applied > 0) {
             showToast(`Synced ${applied} change${applied > 1 ? "s" : ""} made while offline.`, "success");
             await loadSupabaseData(); // rebuild state from the cloud (also re-maps ids)
+            if (failed.length > 0) applyPendingOpsToLocalState(failed);
             cloudHasData = true;
         }
         if (failed.length > 0) {
