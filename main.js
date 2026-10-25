@@ -1798,7 +1798,7 @@ function renderScoreSheetHeader(categories, itemMaximums) {
                     <div class="score-category-group-bar">
                         <div class="score-category-heading">
                             <strong>${esc(category.name)}</strong>
-                            <small>${esc(category.weight)}% weight${items.length > 1 ? ` · ${items.length} items` : ""}</small>
+                            <small>${esc(category.weight)}%${items.length > 1 ? ` · ${items.length} items` : ""}</small>
                         </div>
                         <button type="button" class="score-add-item-btn"
                             onclick="addCategorySubsection('${jsArg(category.id)}')"
@@ -1949,7 +1949,7 @@ function finalGradeMarkup(studentId, section, gradingPeriod) {
     const covered = Number(result.coveredWeight.toFixed(2));
     const status = !result.weightsValid
         ? `Check weights · ${Number(result.totalWeight.toFixed(2))}%`
-        : result.complete ? "Final" : `Running · ${covered}% weighted`;
+        : result.complete ? "Final" : `Running · ${covered}%`;
     return `<strong class="final-grade-value">${result.grade.toFixed(2)}%</strong>
         <small class="${result.complete ? "final-grade-complete" : "final-grade-running"}">${status}</small>`;
 }
