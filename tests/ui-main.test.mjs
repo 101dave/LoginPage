@@ -47,7 +47,17 @@ test("dashboard renders totals, present/absent counts and section breakdown", as
     assert.equal(document.getElementById("stat-present").textContent, "2");
     assert.equal(document.getElementById("stat-absent").textContent, "1");
     assert.equal(document.getElementById("stat-rate").textContent, "50%");
-    assert.match(document.getElementById("dash-date-label").textContent, /Today \(\d{4}-\d{2}-\d{2}\)/);
+    // Human date, not the raw ISO string (e.g. "Today · Oct 25").
+    assert.match(document.getElementById("dash-date-label").textContent, /^Today · [A-Z][a-z]{2} \d{1,2}(, \d{4})?$/);
+
+    // Bars carry the attendance rate in colour, so 67% cannot look like 100%.
+    const stemFill = [...document.querySelectorAll("#section-breakdown-container .progress-fill")]
+        .map((el) => el.className).find((name) => name.includes("progress-fill-"));
+    assert.ok(stemFill, "each section bar has a rate class");
+    assert.match(
+        document.querySelector("#section-breakdown-container").innerHTML,
+        /progress-fill-(good|warn|low|idle)/
+    );
 
     const breakdown = document.getElementById("section-breakdown-container").textContent;
     assert.match(breakdown, /Grade 11 - STEM/);
@@ -110,6 +120,31 @@ test("class list can show a printable QR code for each student", async (t) => {
 
     window.closeModal("modal-student-qr");
     assert.equal(modal.classList.contains("hidden"), true);
+});
+
+test("student QR cards carry the record code so the record page can open without a login", async (t) => {
+    const db = dbWithToday();
+    db.students = db.students.map((row) => (row.student_id === "2026-0001"
+        ? { ...row, record_code: "K7M2QPX9" }
+        : row));
+    const { window, dom, qr } = await bootMainApp({ db });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    window.switchTab("directory");
+    await waitFor(() => document.querySelectorAll("#directory-table-body tr").length === 4);
+    click(window, document.querySelector("#directory-table-body .action-qr"));
+
+    assert.ok(
+        qr.encoded.includes("SCHOLOG:2026-0001:K7M2QPX9"),
+        `QR encodes id + record code (got ${JSON.stringify(qr.encoded)})`
+    );
+    assert.match(document.getElementById("student-qr-record-code").textContent, /K7M2QPX9/);
+
+    // Bulk cards print it too, so a printed sheet is usable without the modal.
+    window.openBulkStudentQr?.("ALL");
+    const bulk = document.getElementById("student-qr-bulk")?.textContent || "";
+    if (bulk) assert.match(bulk, /K7M2QPX9/);
 });
 
 test("attendance: section selection, sheet rendering and status marking", async (t) => {

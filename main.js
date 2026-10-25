@@ -126,6 +126,16 @@ function todayStr() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// "Oct 22" / "Oct 22, 2025" when the date is not the current year.
+function humanDate(dateStr) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+    if (!match) return String(dateStr || "");
+    const [, year, month, day] = match;
+    const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const label = `${names[Number(month) - 1]} ${Number(day)}`;
+    return Number(year) === new Date().getFullYear() ? label : `${label}, ${year}`;
+}
+
 function isValidDateStr(s) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
     const d = new Date(s + "T00:00:00Z");
@@ -306,7 +316,8 @@ function normalizeState(raw) {
             student_id: String(s.student_id ?? "").trim(),
             name: String(s.name ?? "").trim(),
             email: String(s.email ?? "").trim(),
-            section: String(s.section ?? "").trim()
+            section: String(s.section ?? "").trim(),
+            record_code: String(s.record_code ?? "").trim()
         }))
         .filter(s => {
             if (!s.student_id || !s.name || seenCodes.has(s.student_id)) return false;
@@ -556,7 +567,9 @@ async function fetchCloudState() {
         student_id: s.student_id,
         name: s.name,
         email: s.email,
-        section: s.section
+        section: s.section,
+        // Printed into the QR card; the record page needs it to prove ownership.
+        record_code: s.record_code || ""
     }));
 
     const attendance = {};
@@ -1617,13 +1630,18 @@ function buildFullStatePlan(uid) {
         category_id: category.id
     }));
 
-    const studentRows = state.students.map(s => ({
-        user_id: uid,
-        student_id: s.student_id,
-        name: s.name,
-        email: s.email || null,
-        section: s.section
-    }));
+    const studentRows = state.students.map(s => {
+        const row = {
+            user_id: uid,
+            student_id: s.student_id,
+            name: s.name,
+            email: s.email || null,
+            section: s.section
+        };
+        // Keep the code so restoring a backup does not invalidate printed cards.
+        if (s.record_code) row.record_code = s.record_code;
+        return row;
+    });
 
     const attRows = Object.keys(state.attendance).map(k => {
         const { date, studentId } = parseAttKey(k);
@@ -1675,9 +1693,13 @@ async function pushFullStateToCloud() {
         for (let i = 0; i < plan.studentRows.length; i += 500) {
             const { data, error } = await supabaseClient.from("students").insert(
                 plan.studentRows.slice(i, i + 500)
-            ).select("id, student_id");
+            ).select("id, student_id, record_code");
             if (error) throw error;
             (data || []).forEach(r => { idByCode[r.student_id] = String(r.id); });
+            (data || []).forEach(r => {
+                const local = state.students.find(s => s.student_id === r.student_id);
+                if (local && r.record_code) local.record_code = r.record_code;
+            });
         }
 
         // Remap local ids to the database-generated ones
@@ -1815,7 +1837,7 @@ function openSectionAttendance(sectionName) {
 
 function renderDashboard() {
     const today = todayStr();
-    document.getElementById("dash-date-label").textContent = `Today (${today})`;
+    document.getElementById("dash-date-label").textContent = `Today · ${humanDate(today)}`;
 
     const totalStudents = state.students.length;
     let presentToday = 0;
@@ -1876,7 +1898,7 @@ function renderDashboard() {
                 </div>
                 <div class="breakdown-progress-group">
                     <div class="progress-bar-wrapper">
-                        <div class="progress-fill" style="width: ${secRate}%"></div>
+                        <div class="progress-fill ${secRecorded === 0 ? "progress-fill-idle" : secRate >= 90 ? "progress-fill-good" : secRate >= 75 ? "progress-fill-warn" : "progress-fill-low"}" style="width: ${secRate}%"></div>
                     </div>
                     <span class="stat-value" style="font-size: 16px;">${secRate}%</span>
                     <button type="button" onclick="openSectionAttendance('${jsArg(sec)}')" class="btn btn-secondary dash-take-att-btn" title="Take attendance for ${esc(sec)}">Mark</button>
@@ -3827,7 +3849,14 @@ async function handleStudentSubmit(e) {
         }
         const oldCode = state.students[idx].student_id;
 
-        state.students[idx] = { id: editId, name, student_id: studId, section: sec, email };
+        state.students[idx] = {
+            id: editId,
+            name,
+            student_id: studId,
+            section: sec,
+            email,
+            record_code: state.students[idx].record_code || ""
+        };
 
         if (oldCode !== studId) {
             relinkStudentRecordsLocally(oldCode, studId);
@@ -3945,10 +3974,17 @@ function confirmDeleteSection(sec) {
 }
 
 // --- Student QR ID cards ---
-// The payload is intentionally just the student code with a SCHOLOG: prefix;
-// scan.html accepts it both from the camera and from typed input.
-function studentQrPayload(studentId) {
-    return `SCHOLOG:${String(studentId || "").trim()}`;
+// Payload: `SCHOLOG:<student-id>:<record-code>`.
+//
+// The record code is what lets the student open their own grades without a
+// login while a typed student ID alone returns nothing (see
+// supabase/migrations/20261025_student_record_codes.sql). Cards printed before
+// codes existed still scan for check-in, but their record lookup asks for the
+// code, so reprint after this update.
+function studentQrPayload(studentId, recordCode) {
+    const id = String(studentId || "").trim();
+    const code = String(recordCode || "").trim();
+    return code ? `SCHOLOG:${id}:${code}` : `SCHOLOG:${id}`;
 }
 
 function buildQrSvgMarkup(payload, cellSize = 5) {
@@ -3987,7 +4023,7 @@ function openStudentQr(id) {
     if (titleEl) titleEl.textContent = "Student Check-In QR";
 
     container.innerHTML = "";
-    const payload = studentQrPayload(stud.student_id);
+    const payload = studentQrPayload(stud.student_id, stud.record_code);
     const svg = buildQrSvgMarkup(payload, 5);
     if (!svg) {
         container.textContent = typeof window.qrcode !== "function"
@@ -4000,6 +4036,12 @@ function openStudentQr(id) {
 
     document.getElementById("student-qr-name").textContent = stud.name;
     document.getElementById("student-qr-code").textContent = stud.student_id;
+    const codeEl = document.getElementById("student-qr-record-code");
+    if (codeEl) {
+        codeEl.textContent = stud.record_code
+            ? `Record code: ${stud.record_code}`
+            : "Record code: pending sync — refresh after the student is saved to the cloud.";
+    }
     openModal("modal-student-qr");
     refreshIcons();
 }
@@ -4028,13 +4070,13 @@ function openSectionQrModal(sectionFilter = "ALL") {
     }
 
     bulkWrap.innerHTML = list.map(stud => {
-        const payload = studentQrPayload(stud.student_id);
+        const payload = studentQrPayload(stud.student_id, stud.record_code);
         const svg = buildQrSvgMarkup(payload, 4);
         return `
             <div class="bulk-qr-card-item" data-student-id="${esc(stud.student_id)}">
                 <div class="bulk-qr-svg">${svg || `<span class="font-mono">${esc(payload)}</span>`}</div>
                 <strong class="bulk-qr-name">${esc(stud.name)}</strong>
-                <span class="bulk-qr-code font-mono">${esc(stud.student_id)}</span>
+                <span class="bulk-qr-code font-mono">${esc(stud.student_id)}${stud.record_code ? ` · ${esc(stud.record_code)}` : ""}</span>
                 <small class="bulk-qr-sec">${esc(stud.section)}</small>
             </div>
         `;

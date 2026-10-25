@@ -76,7 +76,9 @@ maximum points; the final grade combines those category percentages using that
 section's weights. Until every weighted subsection in the section has a score, the
 table shows a **running grade** rather than a complete final grade.
 
-Apply `supabase/migrations/20261025_grading_categories.sql`,
+Apply `supabase/migrations/20261025_student_record_codes.sql` (record codes —
+see [Student record access](#student-record-access-record-codes)) plus
+`supabase/migrations/20261025_grading_categories.sql`,
 `supabase/migrations/20261025_per_section_grading_categories.sql`,
 `supabase/migrations/20261025_grading_category_items.sql`, and
 `supabase/migrations/20261025_drop_legacy_score_category_unique_index.sql` so
@@ -153,6 +155,56 @@ Two guarantees worth knowing after a restore:
 If a restore is interrupted by a dropped connection, the same backup file can be
 restored again: restoring is a full replace, never a merge.
 
+## Performance notes
+
+The app is plain static files, so page weight *is* the performance story:
+
+| Page | Initial payload | Notes |
+| --- | --- | --- |
+| `index.html` | ~254 KB | scanner library loaded on demand |
+| `main.html` | ~575 KB | icon subset instead of the 350 KB library; PDF libs deferred until export |
+| `scan.html` | ~757 KB | camera library is the page's whole purpose, so it stays eager |
+| `student-record.html` | ~293 KB | scanner library loaded on demand |
+
+- **Icons** — `vendor/lucide-subset.js` is generated from the full Lucide build and
+  contains only the 37 icons the app references (~17 KB instead of 350 KB).
+  Regenerate after adding a `data-lucide="…"` icon:
+  `node scripts/build-icon-subset.mjs`. `tests/icons.test.mjs` fails if a
+  referenced icon is missing, so this cannot drift silently.
+- **Camera** — `vendor/html5-qrcode.min.js` (367 KB) is injected the first time a
+  student taps the scanner, never on page load.
+- **PDF** — jsPDF + AutoTable (~395 KB) load only when a teacher exports.
+
+## Student record access (record codes)
+
+`student-record.html` shows a learner their own attendance and grades without a
+login. That has to be safe, so it is gated:
+
+- **In class** — a live check-in session token opens the record for students in
+  that section. Unchanged.
+- **Anywhere else** — the student needs the **8-character record code** printed
+  on their QR card (`SCHOLOG:<student-id>:<record-code>`), or typed by hand
+  next to the Student ID.
+
+A Student ID on its own returns `code_required` and **no data**. This closed an
+enumeration hole: IDs are sequential (`2026-0001`, `2026-0002`, …) and were
+printed on cards, so before this change anyone could walk the range and read
+every learner's grades — sensitive personal information under RA 10173.
+
+- Codes come from `public.new_record_code()` (32-character alphabet, 8 chars →
+  2^40), are generated automatically for new students, and are backfilled by
+  `supabase/migrations/20261025_student_record_codes.sql`.
+- The QR modal in **Class List → QR** shows the code under the Student ID, and
+  bulk cards print it too. Announce it once to the class.
+- **Deploy order matters:** apply the migration **before** the new client. The
+  record page calls `get_student_record` with a fifth argument; an old database
+  rejects the call and the page errors instead of loading.
+- Cards printed before this update still work for check-in, but their record
+  page now asks for a code. Reprint them (or just read the code from
+  **Class List → QR**) once the migration is applied.
+- Backup/restore preserves `record_code`, so restoring a backup does not
+  invalidate printed cards.
+
 ## Local development
 
 ```bash
@@ -165,7 +217,7 @@ Open `/index.html`. Camera scanning requires HTTPS or `localhost`.
 ## Tests
 
 ```bash
-npm test                  # UI/PDF/CSV/backup/static checks (jsdom, no network)
+npm test                  # UI/PDF/CSV/backup/icons/static checks (jsdom, no network)
 npm run test:integration  # live Supabase test (needs network + SCHOLOG_INTEGRATION=1)
 ```
 
@@ -174,6 +226,7 @@ authentication flows, dashboard/class list rendering, all four attendance status
 attendance saving and cloud conflict targets, daily PDF content, removal of the
 Monthly SF2 export and dark mode, student QR cards, the standalone check-in page
 (QR scan, typed ID, invalid/closed/expired sessions, host mode, live roster),
+record-code access control (a bare Student ID returns nothing),
 backup/restore round trips (including legacy scores with no grading category),
 the CSV report layout (title block, grouped headers, numeric cells, BOM,
 escaping) and asset/offline-cache consistency.
@@ -200,6 +253,7 @@ public client credentials, protected by Row Level Security).
 index.html, script.js, style.css      auth UI
 main.html, main.js, main.css, pdf.js  teacher app + daily PDF builder
 csv.js                                Excel-friendly score-sheet CSV builder
+scripts/build-icon-subset.mjs         regenerates vendor/lucide-subset.js
 scan.html, scan.js, scan.css          standalone QR / Student ID check-in
 vendor/                               pinned browser libraries (see vendor/README.md)
 supabase/migrations/                  SQL applied to the Supabase project

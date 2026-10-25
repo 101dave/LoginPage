@@ -1,4 +1,4 @@
-const CACHE_NAME = "scholog-shell-v17";
+const CACHE_NAME = "scholog-shell-v18";
 const OFFLINE_FALLBACK = "./index.html";
 const APP_SHELL = [
     "./",
@@ -22,7 +22,7 @@ const APP_SHELL = [
     "./icon-maskable-512.png",
     "./SchologLogo.png",
     "./vendor/supabase.js",
-    "./vendor/lucide.min.js",
+    "./vendor/lucide-subset.js",
     "./vendor/jspdf.umd.min.js",
     "./vendor/jspdf.autotable.min.js",
     "./vendor/qrcode.js",

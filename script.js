@@ -189,7 +189,7 @@ function switchTab(tab) {
         setHeaderText("Student QR Scanner", "Scan your QR code or enter your Student ID to view your scores & attendance");
         scanQrTab?.classList.add("active");
         document.getElementById("studentScanForm")?.classList.add("active");
-        if (window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             startLoginQrScanner();
         }
     } else {
@@ -240,14 +240,37 @@ function navigateToStudentRecord(rawCode) {
     window.location.href = target.href;
 }
 
+// The QR/camera library is ~367 KB. Keep it out of the initial load and fetch
+// it the first time a student actually taps the scanner.
+let qrLibPromise = null;
+function ensureQrLib() {
+    if (window.Html5Qrcode) return Promise.resolve(true);
+    if (!qrLibPromise) {
+        qrLibPromise = new Promise((resolve) => {
+            const script = document.createElement("script");
+            script.src = "vendor/html5-qrcode.min.js";
+            script.async = true;
+            script.onload = () => resolve(Boolean(window.Html5Qrcode));
+            script.onerror = () => resolve(false);
+            document.head.appendChild(script);
+        });
+    }
+    return qrLibPromise;
+}
+
 async function startLoginQrScanner() {
     const readerEl = document.getElementById("login-qr-reader");
     const placeholderEl = document.getElementById("loginQrPlaceholder");
     const stopBtn = document.getElementById("loginStopScanBtn");
     const hintEl = document.getElementById("loginQrHint");
 
-    if (!window.Html5Qrcode || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         if (hintEl) hintEl.textContent = "Camera scanning is not available in this browser. Upload a QR photo or enter your Student ID below.";
+        return;
+    }
+    const loaded = await ensureQrLib();
+    if (!loaded) {
+        if (hintEl) hintEl.textContent = "Camera scanning is not available right now. Upload a QR photo or enter your Student ID below.";
         return;
     }
     if (loginQrScanning && loginQrScanner) return;
@@ -310,7 +333,7 @@ async function handleLoginQrFile(event) {
     if (!file) return;
     await stopLoginQrScanner();
 
-    if (!window.Html5Qrcode) {
+    if (!(await ensureQrLib())) {
         showAlert("QR scanner library unavailable. Please enter your Student ID below.", "error");
         return;
     }

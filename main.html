@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="main.css">
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to content</a>
 
     <!-- Top Navigation -->
     <header class="navbar">
@@ -31,7 +32,7 @@
                 <img src="SchologLogo.png" alt="Scholog Logo" class="brand-logo-img" width="256" height="256" decoding="async">
                 <div>
                     <h1>Scholog</h1>
-                    <span>Attendance</span>
+                    <span>Class Records</span>
                 </div>
             </div>
 
@@ -97,7 +98,7 @@
     </header>
 
     <!-- Main Container -->
-    <main class="main-container">
+    <main class="main-container" id="main-content" tabindex="-1">
         <!-- Toast Notifications -->
         <div id="toast-container" class="toast-container"></div>
 
@@ -482,6 +483,7 @@
                 <div id="student-qr-canvas" class="student-qr-canvas"></div>
                 <h4 id="student-qr-name">Student Name</h4>
                 <p id="student-qr-code" class="student-qr-id">Student ID</p>
+                <p id="student-qr-record-code" class="student-qr-id" style="font-size:11px; opacity:0.75;">Record code</p>
                 <p class="student-qr-hint">No QR code? The student can type this ID on the check-in page instead.</p>
             </div>
             <div id="student-qr-bulk" class="student-qr-bulk-grid hidden"></div>
@@ -664,7 +666,7 @@
     </div>
 
     <!-- Vendored libraries (order matters) -->
-    <script src="vendor/lucide.min.js"></script>
+    <script src="vendor/lucide-subset.js"></script>
     <script src="vendor/qrcode.js"></script>
     <script src="vendor/supabase.js"></script>
     <script src="pdf.js"></script>
