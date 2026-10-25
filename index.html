@@ -41,6 +41,7 @@
             <div id="authTabs" class="tabs">
                 <button id="loginTab" type="button" class="tab active" onclick="switchTab('login')">Sign In</button>
                 <button id="signupTab" type="button" class="tab" onclick="switchTab('signup')">Create Account</button>
+                <button id="scanQrTab" type="button" class="tab" onclick="switchTab('scan')">Scan QR</button>
             </div>
 
             <div id="alertBox" class="alert hidden"></div>
@@ -60,6 +61,53 @@
                 </div>
                 <button type="submit" id="loginSubmitBtn" class="btn">
                     <span>Sign In</span>
+                </button>
+
+                <div class="auth-student-divider">
+                    <span>Students</span>
+                </div>
+                <button type="button" id="loginScanQrBtn" class="btn-secondary-scan" onclick="switchTab('scan')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                        <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
+                    </svg>
+                    <span>Scan QR (View Score &amp; Attendance)</span>
+                </button>
+            </form>
+
+            <!-- Student Scan QR Form (inside Login Card, no login required) -->
+            <form id="studentScanForm" class="form" onsubmit="handleStudentLookupSubmit(event)">
+                <div class="login-qr-stage" id="loginQrStage">
+                    <div id="login-qr-reader" class="login-qr-reader hidden" aria-label="Student QR camera scanner"></div>
+                    <div id="loginQrPlaceholder" class="login-qr-placeholder">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                            <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                            <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                            <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
+                        </svg>
+                        <p id="loginQrHint">Point the camera at your Student QR card or upload a saved QR photo.</p>
+                        <div class="login-qr-actions">
+                            <button type="button" id="loginStartScanBtn" class="btn-qr-action btn-qr-primary" onclick="startLoginQrScanner()">Turn On Camera</button>
+                            <button type="button" id="loginQrFileBtn" class="btn-qr-action" onclick="triggerLoginQrFile()">Upload QR Photo</button>
+                        </div>
+                    </div>
+                    <button type="button" id="loginStopScanBtn" class="btn-qr-action login-stop-scan hidden" onclick="stopLoginQrScanner()">Turn Off Camera</button>
+                </div>
+                <input type="file" id="loginQrFileInput" accept="image/*" class="hidden" onchange="handleLoginQrFile(event)" aria-label="Upload Student QR photo">
+                <div id="login-qr-file-scratch" class="hidden" aria-hidden="true"></div>
+
+                <div class="auth-student-divider">
+                    <span>Or enter Student ID</span>
+                </div>
+                <div class="input-group">
+                    <label for="loginStudentIdInput">Student ID</label>
+                    <input type="text" id="loginStudentIdInput" placeholder="e.g. 12345678" autocomplete="off" spellcheck="false">
+                </div>
+                <button type="submit" id="loginStudentLookupBtn" class="btn">
+                    <span>View My Score &amp; Attendance</span>
                 </button>
             </form>
 
@@ -153,6 +201,7 @@
 
     <!-- Vendored SDK + app logic (order matters) -->
     <script src="vendor/supabase.js"></script>
+    <script src="vendor/html5-qrcode.min.js"></script>
     <script src="script.js"></script>
     <script>
         if ("serviceWorker" in navigator) {

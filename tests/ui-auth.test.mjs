@@ -112,3 +112,19 @@ test("reset-password form validates matching passwords", async (t) => {
     await waitFor(() => client.lastUpdatedUser, { label: "password update" });
     assert.equal(client.lastUpdatedUser.password, "abcdef");
 });
+
+test("login page exposes Scan QR tab and button for students", async (t) => {
+    const { window, dom } = await bootAuthPage();
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    assert.ok(document.getElementById("scanQrTab"), "Scan QR tab exists in auth tabs");
+    assert.ok(document.getElementById("loginScanQrBtn"), "Scan QR button exists inside login form");
+
+    document.getElementById("loginScanQrBtn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(document.getElementById("scanQrTab").classList.contains("active"), true);
+    assert.equal(document.getElementById("studentScanForm").classList.contains("active"), true);
+    assert.equal(document.getElementById("loginForm").classList.contains("active"), false);
+    assert.equal(window.extractLoginStudentId("SCHOLOG:12345678"), "12345678");
+});
+
