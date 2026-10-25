@@ -934,6 +934,16 @@ test("student scores: categories support multiple subsections (e.g. 6 Written Wo
     assert.equal(groupHeaders[1].getAttribute("colspan"), "2");
     assert.equal(groupHeaders[2].getAttribute("colspan"), "2");
     assert.equal(document.querySelectorAll("#score-table-head .score-grid-category").length, 10);
+
+    // Every header cell and body cell in the Student Score Spreadsheet keeps its text centered
+    const allHeadCells = [...document.querySelectorAll("#score-table-head th")];
+    assert.ok(allHeadCells.every(th => th.classList.contains("text-center")), "all score spreadsheet header cells are centered");
+    const allBodyCells = [...document.querySelectorAll("#score-table-body td")];
+    assert.ok(allBodyCells.every(td => td.classList.contains("text-center")), "all score spreadsheet body cells are centered");
+    const mainCss = fs.readFileSync(path.join(ROOT, "main.css"), "utf8");
+    assert.match(mainCss, /\.score-category-group-bar\s*\{[^}]*flex-direction:\s*column/, "category header stacks + Add under centered title");
+    assert.match(mainCss, /\.score-remove-item-btn\s*\{[^}]*position:\s*absolute/, "remove item button does not push subsection label off-center");
+    assert.match(mainCss, /\.score-input::-webkit-inner-spin-button[\s\S]*?-webkit-appearance:\s*none/, "number spin arrows removed so scores center cleanly");
     assert.match(
         document.getElementById("score-weight-summary").textContent,
         /Written Work 30% \(6 items\) · Quiz 20% \(2 items\) · Performance Task 50% \(2 items\)/
