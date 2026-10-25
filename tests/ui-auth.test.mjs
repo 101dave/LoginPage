@@ -113,15 +113,16 @@ test("reset-password form validates matching passwords", async (t) => {
     assert.equal(client.lastUpdatedUser.password, "abcdef");
 });
 
-test("login page exposes Scan QR tab and button for students", async (t) => {
+test("login page exposes Scan QR tab for students without cluttering Sign In or Create Account", async (t) => {
     const { window, dom } = await bootAuthPage();
     t.after(() => dom.window.close());
     const document = window.document;
 
     assert.ok(document.getElementById("scanQrTab"), "Scan QR tab exists in auth tabs");
-    assert.ok(document.getElementById("loginScanQrBtn"), "Scan QR button exists inside login form");
+    assert.equal(document.getElementById("loginScanQrBtn"), null, "no extra Scan QR button under Sign In");
+    assert.equal(document.getElementById("studentPortalBanner"), null, "no extra student banner below the card");
 
-    document.getElementById("loginScanQrBtn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    document.getElementById("scanQrTab").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     assert.equal(document.getElementById("scanQrTab").classList.contains("active"), true);
     assert.equal(document.getElementById("studentScanForm").classList.contains("active"), true);
     assert.equal(document.getElementById("loginForm").classList.contains("active"), false);

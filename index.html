@@ -62,19 +62,6 @@
                 <button type="submit" id="loginSubmitBtn" class="btn">
                     <span>Sign In</span>
                 </button>
-
-                <div class="auth-student-divider">
-                    <span>Students</span>
-                </div>
-                <button type="button" id="loginScanQrBtn" class="btn-secondary-scan" onclick="switchTab('scan')">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
-                        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
-                        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
-                        <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
-                    </svg>
-                    <span>Scan QR (View Score &amp; Attendance)</span>
-                </button>
             </form>
 
             <!-- Student Scan QR Form (inside Login Card, no login required) -->
@@ -159,25 +146,6 @@
                     <button type="button" class="link-btn" onclick="cancelResetPassword()">&larr; Cancel &amp; return to Sign In</button>
                 </div>
             </form>
-        </div>
-
-        <!-- Student Self-Service QR Scanner & Record Lookup (No Login or Link Required) -->
-        <div id="studentPortalBanner" class="student-portal-banner">
-            <div class="student-portal-content">
-                <div class="student-portal-text">
-                    <strong>Are you a student?</strong>
-                    <p>Scan your Student QR card or enter your ID to check in and view your scores &amp; attendance.</p>
-                </div>
-                <a id="studentPortalBtn" href="student-record.html" class="btn-student-portal">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
-                        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
-                        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
-                        <path d="M14 14h3v3h-3z"/><path d="M20 14v.01M14 20v.01M20 20v.01"/>
-                    </svg>
-                    <span>Scan QR / View My Record</span>
-                </a>
-            </div>
         </div>
 
         <!-- Download App Suggestion Box sa Ilalim -->
