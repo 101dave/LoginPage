@@ -12,6 +12,8 @@ let supabaseClient = null;
 let authBusy = false;
 let isRecoveryMode = false;
 let resetCooldownTimer = null;
+let loginQrScanner = null;
+let loginQrScanning = false;
 
 // PWA Install Prompt State
 let deferredPrompt = null;
@@ -158,31 +160,177 @@ function setHeaderText(title, subtitle) {
 }
 
 function hideAllForms() {
-    ["loginForm", "signupForm", "forgotForm", "resetForm"].forEach(id => {
+    ["loginForm", "signupForm", "studentScanForm", "forgotForm", "resetForm"].forEach(id => {
         document.getElementById(id)?.classList.remove("active");
     });
+    stopLoginQrScanner();
 }
 
 function switchTab(tab) {
     const authTabs = document.getElementById("authTabs");
     const loginTab = document.getElementById("loginTab");
     const signupTab = document.getElementById("signupTab");
+    const scanQrTab = document.getElementById("scanQrTab");
     const alertBox = document.getElementById("alertBox");
 
     alertBox.classList.add("hidden");
     authTabs?.classList.remove("hidden");
     hideAllForms();
-    setHeaderText("Welcome to Scholog", "Sign in to manage your class attendance");
+
+    loginTab?.classList.remove("active");
+    signupTab?.classList.remove("active");
+    scanQrTab?.classList.remove("active");
 
     if (tab === "login") {
-        loginTab.classList.add("active");
-        signupTab.classList.remove("active");
-        document.getElementById("loginForm").classList.add("active");
+        setHeaderText("Welcome to Scholog", "Sign in to manage your class attendance");
+        loginTab?.classList.add("active");
+        document.getElementById("loginForm")?.classList.add("active");
+    } else if (tab === "scan") {
+        setHeaderText("Student QR Scanner", "Scan your QR code or enter your Student ID to view your scores & attendance");
+        scanQrTab?.classList.add("active");
+        document.getElementById("studentScanForm")?.classList.add("active");
+        if (window.Html5Qrcode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            startLoginQrScanner();
+        }
     } else {
-        signupTab.classList.add("active");
-        loginTab.classList.remove("active");
-        document.getElementById("signupForm").classList.add("active");
+        setHeaderText("Welcome to Scholog", "Sign in to manage your class attendance");
+        signupTab?.classList.add("active");
+        document.getElementById("signupForm")?.classList.add("active");
     }
+}
+
+function extractLoginStudentId(raw) {
+    let text = String(raw == null ? "" : raw).trim();
+    if (!text) return "";
+    if (text.charAt(0) === "{") {
+        try {
+            const obj = JSON.parse(text);
+            text = String(obj.student_id || obj.studentId || obj.code || obj.id || "").trim();
+        } catch (err) { /* ignore */ }
+    }
+    if (/^scholog:/i.test(text)) text = text.slice(8).trim();
+    if (/^https?:\/\//i.test(text) || /(?:scan|student-record)\.html/i.test(text)) {
+        try {
+            const url = new URL(text, window.location.href);
+            const fromQuery = url.searchParams.get("student_id") ||
+                url.searchParams.get("sid") ||
+                url.searchParams.get("id") ||
+                url.searchParams.get("student") ||
+                url.searchParams.get("code");
+            if (fromQuery) return fromQuery.trim();
+            const token = url.searchParams.get("t") || url.searchParams.get("token");
+            if (token) {
+                window.location.href = `scan.html?t=${encodeURIComponent(token)}`;
+                return "__REDIRECTING__";
+            }
+        } catch (err) { /* ignore */ }
+    }
+    return text.replace(/[\r\n\t]+/g, " ").trim().slice(0, 64);
+}
+
+function navigateToStudentRecord(rawCode) {
+    const code = extractLoginStudentId(rawCode);
+    if (code === "__REDIRECTING__") return;
+    if (!code) {
+        showAlert("Please scan a valid Student QR code or enter your Student ID.", "error");
+        return;
+    }
+    const target = new URL("student-record.html", window.location.href);
+    target.searchParams.set("student_id", code);
+    window.location.href = target.href;
+}
+
+async function startLoginQrScanner() {
+    const readerEl = document.getElementById("login-qr-reader");
+    const placeholderEl = document.getElementById("loginQrPlaceholder");
+    const stopBtn = document.getElementById("loginStopScanBtn");
+    const hintEl = document.getElementById("loginQrHint");
+
+    if (!window.Html5Qrcode || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        if (hintEl) hintEl.textContent = "Camera scanning is not available in this browser. Upload a QR photo or enter your Student ID below.";
+        return;
+    }
+    if (loginQrScanning && loginQrScanner) return;
+    if (!readerEl) return;
+
+    readerEl.classList.remove("hidden");
+    const scanner = new window.Html5Qrcode("login-qr-reader", { verbose: false });
+    loginQrScanner = scanner;
+    loginQrScanning = true;
+
+    try {
+        await scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 210, height: 210 }, aspectRatio: 1.0 },
+            (decoded) => {
+                stopLoginQrScanner().finally(() => {
+                    navigateToStudentRecord(decoded);
+                });
+            },
+            () => { /* frame miss */ }
+        );
+        placeholderEl?.classList.add("hidden");
+        stopBtn?.classList.remove("hidden");
+    } catch (err) {
+        if (loginQrScanner === scanner) {
+            loginQrScanner = null;
+            loginQrScanning = false;
+        }
+        try { scanner.clear(); } catch (e) { /* ignore */ }
+        readerEl.classList.add("hidden");
+        placeholderEl?.classList.remove("hidden");
+        stopBtn?.classList.add("hidden");
+        if (hintEl) hintEl.textContent = "Could not start the camera. You can upload a QR photo or enter your Student ID below.";
+    }
+}
+
+async function stopLoginQrScanner() {
+    const scanner = loginQrScanner;
+    loginQrScanner = null;
+    loginQrScanning = false;
+    if (scanner) {
+        try { await scanner.stop(); } catch (e) { /* ignore */ }
+        try { scanner.clear(); } catch (e) { /* ignore */ }
+    }
+    const readerEl = document.getElementById("login-qr-reader");
+    if (readerEl) {
+        readerEl.classList.add("hidden");
+        readerEl.innerHTML = "";
+    }
+    document.getElementById("loginQrPlaceholder")?.classList.remove("hidden");
+    document.getElementById("loginStopScanBtn")?.classList.add("hidden");
+}
+
+function triggerLoginQrFile() {
+    document.getElementById("loginQrFileInput")?.click();
+}
+
+async function handleLoginQrFile(event) {
+    const file = event.target && event.target.files && event.target.files[0];
+    if (!file) return;
+    await stopLoginQrScanner();
+
+    if (!window.Html5Qrcode) {
+        showAlert("QR scanner library unavailable. Please enter your Student ID below.", "error");
+        return;
+    }
+
+    try {
+        const fileScanner = new window.Html5Qrcode("login-qr-file-scratch", { verbose: false });
+        const decoded = await fileScanner.scanFile(file, false);
+        try { fileScanner.clear(); } catch (e) { /* ignore */ }
+        event.target.value = "";
+        navigateToStudentRecord(decoded);
+    } catch (err) {
+        event.target.value = "";
+        showAlert("No valid QR code found in that image. Try another photo or enter your Student ID below.", "error");
+    }
+}
+
+function handleStudentLookupSubmit(e) {
+    e.preventDefault();
+    const input = document.getElementById("loginStudentIdInput");
+    navigateToStudentRecord(input ? input.value : "");
 }
 
 function openForgotPassword(clearMessages = true) {
