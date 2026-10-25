@@ -175,6 +175,40 @@ The app is plain static files, so page weight *is* the performance story:
   student taps the scanner, never on page load.
 - **PDF** — jsPDF + AutoTable (~395 KB) load only when a teacher exports.
 
+## Grading schemes (high school and college)
+
+One account can handle a high-school section and a college block, because the
+period structure belongs to the **section**, not to the account:
+
+| Preset | Periods | Final grade |
+| --- | --- | --- |
+| `k12-terms` | Term 1–3 (DO 015 s. 2026) | average of the term grades, transmutation optional |
+| `k12-quarters` | Quarter 1–4 (DO 8, legacy) | average of the quarters |
+| `college-semestral` | Prelim / Midterm / Semi-Final / Final | average, or weighted by each period's % |
+| `college-midterm-finals` | Midterm / Finals | same |
+| `custom` | anything the teacher types | same |
+| *(none)* | Quarter 1–4 + Semester 1–2 | legacy behaviour, existing scores untouched |
+
+Where it lives:
+
+* **Scores → Categories & Weights** opens the scheme editor. Pick a preset, rename
+  or add periods, choose average vs weighted, and toggle DepEd transmutation.
+* Presets also prefill the official component weights: Written Work 30 /
+  Performance Task 30 / Term Exam 40 for DO 015, Class Standing 60 / Major Exam
+  40 for college. A setup the teacher already typed is never overwritten.
+* **Scores → Final Grades** shows every period's grade plus the combined grade
+  and its descriptor (Advancing / Benchmarking / Connecting / Developing /
+  Emerging). `Save Grades CSV` exports the same table.
+* A period with no score is shown as `—`: the final grade is *running*, never a
+  silent zero. A missing weight falls back to an equal share.
+
+Storage: `section_grading_schemes` (one row per `user_id, section`), synced
+through the offline queue as the `gradingScheme` op. Sections without a row keep
+the legacy period list, so existing data needs no migration of scores.
+
+Transmutation, when enabled, records a raw grade below 70 as **75** and labels
+the cell (`transmuted from 60.00`).
+
 ## Student record access (record codes)
 
 `student-record.html` shows a learner their own attendance and grades without a

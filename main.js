@@ -56,7 +56,11 @@ let state = {
     attendance: {},
     scores: {},
     gradeCategories: [],
-    sectionGradeCategories: {}
+    sectionGradeCategories: {},
+    // Per-section grading scheme (period structure + how the final grade is
+    // built from those periods). Empty when a section still uses the legacy
+    // Quarter/Semester list.
+    gradingSchemes: {}
 };
 
 const SCORE_KEY_SEPARATOR = "|";
@@ -406,7 +410,20 @@ function normalizeState(raw) {
     });
 
     const sectionGradeCategories = sanitizeSectionGradeCategories(raw.sectionGradeCategories, gradeCategories);
-    return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories };
+
+    const gradingSchemes = {};
+    const rawSchemes = (raw.gradingSchemes && typeof raw.gradingSchemes === "object" && !Array.isArray(raw.gradingSchemes))
+        ? raw.gradingSchemes
+        : {};
+    Object.keys(rawSchemes).forEach(section => {
+        const scheme = sanitizeGradingScheme(rawSchemes[section]);
+        if (section && scheme) gradingSchemes[section] = scheme;
+    });
+    Object.keys(gradingSchemes).forEach(section => {
+        if (!sections.includes(section)) sections.push(section);
+    });
+
+    return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories, gradingSchemes };
 }
 
 // --- Initialization ---
@@ -558,14 +575,16 @@ async function fetchCloudState() {
     ]);
 
     // Newer grading tables are optional while an older deployment is being migrated.
-    const [scRes, catRes, secCatRes] = await Promise.allSettled([
+    const [scRes, catRes, secCatRes, schemeRes] = await Promise.allSettled([
         fetchAll("scores", currentUser.id),
         fetchAll("grading_categories", currentUser.id),
-        fetchAll("section_grading_categories", currentUser.id)
+        fetchAll("section_grading_categories", currentUser.id),
+        fetchAll("section_grading_schemes", currentUser.id)
     ]);
     const scData = scRes.status === "fulfilled" ? scRes.value : [];
     const categoryData = catRes.status === "fulfilled" ? catRes.value : [];
     const sectionCategoryData = secCatRes.status === "fulfilled" ? secCatRes.value : [];
+    const schemeData = schemeRes.status === "fulfilled" ? schemeRes.value : [];
 
     const sections = secData.map(s => s.name);
     const students = studData.map(s => ({
@@ -635,18 +654,33 @@ async function fetchCloudState() {
         };
     });
 
+    const gradingSchemes = {};
+    schemeData.forEach(row => {
+        const scheme = sanitizeGradingScheme({
+            preset: row.preset,
+            periods: row.periods,
+            finalRule: row.final_rule,
+            transmute: row.transmute
+        });
+        if (row.section && scheme) gradingSchemes[row.section] = scheme;
+    });
+
     students.forEach(s => {
         if (s.section && !sections.includes(s.section)) sections.push(s.section);
     });
     gradeCategories.forEach(cat => {
         if (cat.section && !sections.includes(cat.section)) sections.push(cat.section);
     });
+    Object.keys(gradingSchemes).forEach(section => {
+        if (!sections.includes(section)) sections.push(section);
+    });
 
-    return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories };
+    return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories, gradingSchemes };
 }
 
 function applyCloudState(snapshot) {
     state = snapshot;
+    if (!state.gradingSchemes || typeof state.gradingSchemes !== "object") state.gradingSchemes = {};
     cloudHasData = state.sections.length > 0
         || state.students.length > 0
         || Object.keys(state.attendance).length > 0;
@@ -754,6 +788,14 @@ function applyPendingOpsToLocalState(ops) {
                     }
                 });
                 break;
+            case "gradingScheme": {
+                const scheme = sanitizeGradingScheme(op.scheme);
+                if (op.section) {
+                    if (scheme) state.gradingSchemes[op.section] = scheme;
+                    else delete state.gradingSchemes[op.section];
+                }
+                break;
+            }
             case "gradingConfig":
                 if (Array.isArray(op.categories) && op.section) {
                     const sectionCategories = sanitizeGradeCategories(op.categories, null, op.section)
@@ -893,6 +935,8 @@ function queueOp(op) {
             ));
         } else if (op.t === "gradingConfig") {
             out = q.filter(e => !(e.t === "gradingConfig" && e.section === op.section));
+        } else if (op.t === "gradingScheme") {
+            out = q.filter(e => !(e.t === "gradingScheme" && e.section === op.section));
         }
         if (!op._qid) {
             op._qid = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1393,6 +1437,24 @@ async function applyCloudOp(op) {
         case "gradingConfig": // one section's independent categories and weights
             await syncGradingConfigToCloud(op, uid);
             break;
+        case "gradingScheme": { // one section's period structure and final-grade rule
+            const scheme = sanitizeGradingScheme(op.scheme);
+            if (!scheme) {
+                must(await supabaseClient.from("section_grading_schemes").delete()
+                    .eq("user_id", uid).eq("section", op.section));
+                break;
+            }
+            must(await supabaseClient.from("section_grading_schemes").upsert({
+                user_id: uid,
+                section: op.section,
+                preset: scheme.preset,
+                periods: scheme.periods,
+                final_rule: scheme.finalRule,
+                transmute: scheme.transmute,
+                updated_at: new Date().toISOString()
+            }, { onConflict: "user_id,section" }));
+            break;
+        }
         case "att-": // remove one student's attendance history
             must(await supabaseClient.from("attendance").delete()
                 .eq("user_id", uid).eq("student_id", op.student_id));
@@ -1801,6 +1863,7 @@ function switchTab(tabName) {
     }
     if (tabName === "scores") {
         populateSectionDropdowns();
+        populatePeriodSelect();
         loadScoreSheet();
         syncLatestFromCloud().catch(() => {});
     }
@@ -2187,6 +2250,181 @@ function getSelectedGradeCategoryIds(section) {
     return getSectionGradeCategories(section).map(category => category.id);
 }
 
+// --- Grading schemes: terms for DepEd, periods for college ----------------
+//
+// A teacher may handle both a Grade 11 section and a college block, so the
+// period structure belongs to the SECTION, never to the account and never
+// guessed from the section name ("BSIT 1-A" and "Grade 11 - STEM" are free
+// text). Whatever is not configured keeps the legacy Quarter/Semester list, so
+// every existing score stays reachable.
+
+const LEGACY_GRADING_PERIODS = [
+    "General", "Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4", "Semester 1", "Semester 2"
+];
+
+const GRADING_FINAL_RULES = {
+    average: "Average of the periods that have grades",
+    weighted: "Weighted — each period's % below decides its share"
+};
+
+const GRADING_PRESETS = {
+    legacy: {
+        label: "Keep current — Quarters & Semesters",
+        hint: "Existing behaviour. Quarter 1–4 and Semester 1–2 stay available for this section.",
+        periods: [],
+        finalRule: "average",
+        transmute: false
+    },
+    "k12-terms": {
+        label: "High School — DO 015 s. 2026 (3 terms)",
+        hint: "Term 1–3. Categories are prefilled with DepEd's Written Work 30% / Performance Task 30% / Term Exam 40%.",
+        periods: ["Term 1", "Term 2", "Term 3"],
+        finalRule: "average",
+        transmute: true,
+        categories: [
+            { name: "Written Work", weight: 30, items: 6 },
+            { name: "Performance Task", weight: 30, items: 4 },
+            { name: "Term Exam", weight: 40, items: 1 }
+        ]
+    },
+    "k12-quarters": {
+        label: "High School — Quarters (DO 8, legacy)",
+        hint: "Quarter 1–4, for classes whose records are still on the quarterly system.",
+        periods: ["Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"],
+        finalRule: "average",
+        transmute: true,
+        categories: [
+            { name: "Written Work", weight: 30, items: 6 },
+            { name: "Performance Task", weight: 50, items: 4 },
+            { name: "Quarterly Assessment", weight: 20, items: 1 }
+        ]
+    },
+    "college-semestral": {
+        label: "College — Prelim / Midterm / Semi-Final / Final",
+        hint: "One semester's four periods. Set each period's share below, or keep them equal.",
+        periods: ["Prelim", "Midterm", "Semi-Final", "Final"],
+        finalRule: "average",
+        transmute: false,
+        categories: [
+            { name: "Class Standing", weight: 60, items: 4 },
+            { name: "Major Exam", weight: 40, items: 1 }
+        ]
+    },
+    "college-midterm-finals": {
+        label: "College — Midterm / Finals",
+        hint: "Two periods per semester.",
+        periods: ["Midterm", "Finals"],
+        finalRule: "average",
+        transmute: false,
+        categories: [
+            { name: "Class Standing", weight: 60, items: 4 },
+            { name: "Major Exam", weight: 40, items: 1 }
+        ]
+    },
+    custom: {
+        label: "Custom — I will name the periods",
+        hint: "Type any period names (e.g. Grading 1, Grading 2, Finals).",
+        periods: [],
+        finalRule: "average",
+        transmute: false
+    }
+};
+
+function sanitizeGradingPeriods(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const periods = [];
+    value.forEach(entry => {
+        const raw = typeof entry === "string" ? { name: entry } : (entry || {});
+        const name = String(raw.name == null ? "" : raw.name).trim().slice(0, 40);
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        const weight = Number(raw.weight);
+        periods.push({
+            name,
+            weight: Number.isFinite(weight) ? Math.min(100, Math.max(0, weight)) : null
+        });
+    });
+    return periods.slice(0, 12);
+}
+
+/** Normalise a stored/queued scheme, or return null when it is not usable. */
+function sanitizeGradingScheme(value) {
+    if (!value || typeof value !== "object") return null;
+    const periods = sanitizeGradingPeriods(value.periods);
+    if (periods.length === 0) return null;
+    const preset = Object.prototype.hasOwnProperty.call(GRADING_PRESETS, value.preset) ? value.preset : "custom";
+    return {
+        preset,
+        periods,
+        finalRule: value.finalRule === "weighted" ? "weighted" : "average",
+        transmute: Boolean(value.transmute)
+    };
+}
+
+function getSectionScheme(section) {
+    if (!section) return null;
+    return sanitizeGradingScheme(state.gradingSchemes?.[section]);
+}
+
+/** Period names offered for a section: the scheme's, else the legacy list. */
+function getSectionPeriods(section) {
+    const scheme = getSectionScheme(section);
+    if (!scheme) {
+        return {
+            names: LEGACY_GRADING_PERIODS.slice(),
+            grouped: [
+                { label: "Quarterly", names: ["Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"] },
+                { label: "Semestral", names: ["Semester 1", "Semester 2"] }
+            ],
+            scheme: null
+        };
+    }
+    return {
+        names: ["General", ...scheme.periods.map(period => period.name)],
+        grouped: [{ label: GRADING_PRESETS[scheme.preset].label, names: scheme.periods.map(period => period.name) }],
+        scheme
+    };
+}
+
+/**
+ * Periods that actually hold scores for a section, in the legacy order.
+ * Used when a section has no scheme yet, so the summary does not invent
+ * quarter columns for a class that records semesters.
+ */
+function getLegacyPeriodsInUse(section) {
+    const codes = new Set(
+        state.students.filter(stud => stud.section === section).map(stud => stud.student_id)
+    );
+    const used = new Set();
+    Object.keys(state.scores).forEach(key => {
+        const value = state.scores[key];
+        if (!value) return;
+        const parsed = parseScoreKey(key);
+        const studentId = value.student_id || parsed.studentId;
+        if (!codes.has(studentId)) return;
+        const period = value.grading_period || parseLegacyScoreSubject(value.subject || parsed.subject).period;
+        if (period && period !== "General") used.add(period);
+    });
+    const ordered = LEGACY_GRADING_PERIODS.filter(period => period !== "General" && used.has(period));
+    used.forEach(period => {
+        if (!LEGACY_GRADING_PERIODS.includes(period)) ordered.push(period);
+    });
+    return ordered;
+}
+
+/** DepEd descriptor bands (DO 015 s. 2026). */
+function gradeDescriptor(grade) {
+    if (grade == null || !Number.isFinite(grade)) return "";
+    if (grade >= 90) return "Advancing";
+    if (grade >= 80) return "Benchmarking";
+    if (grade >= 75) return "Connecting";
+    if (grade >= 65) return "Developing";
+    return "Emerging";
+}
+
 function getCategoryItems(category) {
     if (!Array.isArray(category.items) || category.items.length === 0) {
         category.items = sanitizeCategoryItems(null, 1);
@@ -2385,6 +2623,68 @@ function calculateStudentFinalGrade(studentId, section, gradingPeriod) {
     };
 }
 
+/**
+ * The grade a parent signs: every period's grade, combined by the section's
+ * rule, then (optionally) transmuted per DepEd.
+ *
+ * Weighted mode uses each period's own %; a period with no weight falls back to
+ * an equal share so one missing number cannot silently zero the whole subject.
+ */
+function calculateSectionFinalGrade(studentId, section) {
+    const scheme = getSectionScheme(section);
+    const { names, grouped } = getSectionPeriods(section);
+    const periods = (scheme ? scheme.periods.map(period => period.name) : names.filter(name => name !== "General"));
+    const rows = periods.map(name => {
+        const result = calculateStudentFinalGrade(studentId, section, name);
+        const configured = scheme?.periods.find(period => period.name === name);
+        return {
+            period: name,
+            grade: result.grade,
+            complete: result.complete,
+            weight: configured && Number.isFinite(configured.weight) ? configured.weight : null
+        };
+    });
+
+    const graded = rows.filter(row => row.grade != null);
+    if (graded.length === 0) {
+        return {
+            periods: rows,
+            final: null,
+            raw: null,
+            transmuted: false,
+            descriptor: "",
+            complete: false,
+            rule: scheme?.finalRule || "average",
+            scheme,
+            label: grouped[0]?.label || "Quarters & Semesters"
+        };
+    }
+
+    const rule = scheme?.finalRule === "weighted" ? "weighted" : "average";
+    const totalWeight = graded.reduce((sum, row) => sum + (row.weight ?? 0), 0);
+    const useWeights = rule === "weighted" && totalWeight > 0;
+    const raw = useWeights
+        ? graded.reduce((sum, row) => sum + row.grade * (row.weight ?? 0), 0) / totalWeight
+        : graded.reduce((sum, row) => sum + row.grade, 0) / graded.length;
+
+    // DepEd transmutation: a raw grade below 70 is recorded as 75.
+    const transmute = Boolean(scheme?.transmute) && raw < 70;
+    const final = transmute ? 75 : raw;
+
+    return {
+        periods: rows,
+        final,
+        raw,
+        transmuted: transmute,
+        descriptor: gradeDescriptor(final),
+        // "Complete" = every period has a grade and every weighted item was scored.
+        complete: graded.length === rows.length && rows.every(row => row.complete),
+        rule,
+        scheme,
+        label: grouped[0]?.label || "Quarters & Semesters"
+    };
+}
+
 function finalGradeMarkup(studentId, section, gradingPeriod) {
     const result = calculateStudentFinalGrade(studentId, section, gradingPeriod);
     if (result.grade == null) return `<span class="final-grade-empty">—</span><small>No scores</small>`;
@@ -2517,6 +2817,106 @@ function findScoreRecord(date, studentId, gradingPeriod, category, item = null) 
     return { key: exactKey, value: null };
 }
 
+/** Rebuild the period dropdown from the selected section's scheme. */
+function populatePeriodSelect() {
+    const select = document.getElementById("score-period");
+    if (!select) return;
+    const section = document.getElementById("score-section")?.value || "";
+    const previous = select.value;
+    const { names, grouped, scheme } = getSectionPeriods(section);
+
+    const parts = ['<option value="General">Unassigned / Previous Scores</option>'];
+    grouped.forEach(group => {
+        const options = group.names
+            .filter(name => names.includes(name))
+            .map(name => `<option value="${esc(name)}">${esc(name)}</option>`)
+            .join("");
+        if (options) parts.push(`<optgroup label="${esc(group.label)}">${options}</optgroup>`);
+    });
+    select.innerHTML = parts.join("");
+
+    // Keep the teacher's choice when it still exists, else start at the first
+    // real period of the scheme (General is only for legacy/unassigned scores).
+    if (previous && names.includes(previous)) {
+        select.value = previous;
+    } else if (scheme && scheme.periods.length > 0) {
+        select.value = scheme.periods[0].name;
+    } else {
+        select.value = "General";
+    }
+}
+
+function onScoreSectionChange() {
+    populatePeriodSelect();
+    loadScoreSheet();
+}
+
+/**
+ * Final-grades table: one row per learner, one column per period, then the
+ * combined grade. Rendered from the same numbers the CSV/PDF use.
+ */
+function renderGradeSummary() {
+    const card = document.getElementById("grade-summary-card");
+    if (!card) return;
+    const section = document.getElementById("score-section")?.value || "";
+    const head = document.getElementById("grade-summary-head");
+    const body = document.getElementById("grade-summary-body");
+    const subtitle = document.getElementById("grade-summary-subtitle");
+    if (!head || !body) return;
+
+    const { scheme, grouped } = getSectionPeriods(section);
+    const periodNames = scheme ? scheme.periods.map(period => period.name) : [];
+    const students = section ? state.students.filter(stud => stud.section === section) : [];
+
+    if (subtitle) {
+        const rule = scheme
+            ? `${grouped[0].label} · ${scheme.finalRule === "weighted" ? "weighted periods" : "average of periods"}${
+                scheme.transmute ? " · DepEd transmutation on" : ""
+            }`
+            : "Quarters & Semesters — the combined grade follows each period's own grade";
+        subtitle.textContent = section ? `${section} · ${rule}` : "Select a section to see final grades";
+    }
+
+    if (!section || students.length === 0) {
+        head.innerHTML = "";
+        body.innerHTML = `<tr><td class="text-center score-grid-empty">${
+            section ? "No students in this section yet." : "No sections yet. Add a section and students first."
+        }</td></tr>`;
+        return;
+    }
+
+    const legacyPeriods = periodNames.length > 0 ? [] : getLegacyPeriodsInUse(section);
+    const columns = periodNames.length > 0
+        ? periodNames
+        : (legacyPeriods.length > 0 ? legacyPeriods : ["Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"]);
+    head.innerHTML = `<tr><th>Student ID</th><th>Name</th>${
+        columns.map(name => `<th>${esc(name)}</th>`).join("")
+    }<th>Final Grade</th><th>Descriptor</th></tr>`;
+
+    const rows = students.map(stud => {
+        const result = calculateSectionFinalGrade(stud.student_id, section);
+        const cells = columns.map(name => {
+            const row = result.periods.find(entry => entry.period === name);
+            return row && row.grade != null
+                ? `<td>${row.grade.toFixed(2)}</td>`
+                : `<td class="grade-cell-missing">—</td>`;
+        }).join("");
+        const finalCell = result.final == null
+            ? `<td class="grade-cell-missing">—</td>`
+            : `<td><strong>${result.final.toFixed(2)}</strong>${
+                result.transmuted ? `<small class="grade-transmuted"> transmuted from ${result.raw.toFixed(2)}</small>` : ""
+            }</td>`;
+        return `<tr>
+            <td>${esc(stud.student_id)}</td>
+            <td>${esc(stud.name)}</td>
+            ${cells}
+            ${finalCell}
+            <td>${result.descriptor ? esc(result.descriptor) : "—"}</td>
+        </tr>`;
+    }).join("");
+    body.innerHTML = rows;
+}
+
 function loadScoreSheet() {
     const selectedDate = document.getElementById("score-date")?.value || "";
     const selectedSec = document.getElementById("score-section")?.value || "";
@@ -2546,6 +2946,7 @@ function loadScoreSheet() {
     const columnCount = totalItemColumns + 3;
     renderScoreSheetHeader(categories, itemMaximums);
     renderScoreWeightSummary(selectedSec);
+    renderGradeSummary();
 
     const periodLabel = selectedPeriod === "General" ? "Unassigned" : selectedPeriod;
     const badge = document.getElementById("score-period-badge");
@@ -3002,6 +3403,172 @@ function setGradingSetupError(message = "") {
     error.classList.toggle("hidden", !message);
 }
 
+function gradingPeriodRowMarkup(period = { name: "", weight: null }) {
+    return `<div class="grading-period-row">
+        <input type="text" class="form-control grading-period-name" maxlength="40"
+               placeholder="e.g. Term 1" value="${esc(period.name || "")}" aria-label="Grading period name">
+        <input type="number" class="form-control grading-period-weight" min="0" max="100" step="0.01"
+               placeholder="equal" value="${period.weight == null ? "" : Number(period.weight)}"
+               aria-label="Share of the final grade">
+        <button type="button" class="icon-btn grading-period-remove" onclick="removeGradingPeriodRow(this)"
+                title="Remove this period" aria-label="Remove this period"><i data-lucide="x"></i></button>
+    </div>`;
+}
+
+function renderGradingPeriodRows(scheme) {
+    const rows = document.getElementById("grading-period-rows");
+    if (!rows) return;
+    const preset = document.getElementById("grading-preset");
+    const finalRule = document.getElementById("grading-final-rule");
+    const transmute = document.getElementById("grading-transmute");
+    const hint = document.getElementById("grading-scheme-hint");
+
+    const presetKey = scheme?.preset && GRADING_PRESETS[scheme.preset] ? scheme.preset : "legacy";
+    if (preset) preset.value = presetKey;
+    if (finalRule) finalRule.value = scheme?.finalRule === "weighted" ? "weighted" : "average";
+    if (transmute) transmute.checked = Boolean(scheme?.transmute);
+    if (hint) hint.textContent = GRADING_PRESETS[presetKey].hint;
+
+    const periods = scheme?.periods?.length
+        ? scheme.periods
+        : GRADING_PRESETS[presetKey].periods.map(name => ({ name, weight: null }));
+    rows.innerHTML = periods.length > 0
+        ? periods.map(period => gradingPeriodRowMarkup(period)).join("")
+        : gradingPeriodRowMarkup();
+
+    const weighted = scheme?.finalRule === "weighted";
+    const weightHeader = document.getElementById("grading-period-weight-head");
+    if (weightHeader) weightHeader.textContent = weighted ? "% of final" : "Weight (optional)";
+}
+
+/** Preset chosen: replace the rows with that preset's periods. */
+function applyGradingPreset() {
+    const presetKey = document.getElementById("grading-preset")?.value || "legacy";
+    const preset = GRADING_PRESETS[presetKey] || GRADING_PRESETS.legacy;
+    const hint = document.getElementById("grading-scheme-hint");
+    if (hint) hint.textContent = preset.hint;
+
+    const rows = document.getElementById("grading-period-rows");
+    if (rows) {
+        // A preset is a starting point, not a locked choice: the teacher can
+        // rename or add periods afterwards.
+        rows.innerHTML = preset.periods.length > 0
+            ? preset.periods.map(name => gradingPeriodRowMarkup({ name, weight: null })).join("")
+            : gradingPeriodRowMarkup();
+    }
+    const finalRule = document.getElementById("grading-final-rule");
+    if (finalRule) finalRule.value = preset.finalRule;
+    const transmute = document.getElementById("grading-transmute");
+    if (transmute) transmute.checked = preset.transmute;
+
+    applyPresetCategories(preset);
+    setGradingSetupError();
+}
+
+/**
+ * Prefill the category rows with the preset's component weights, but only when
+ * the teacher has not typed any category yet — an existing setup is never
+ * overwritten by switching presets.
+ */
+function applyPresetCategories(preset) {
+    if (!Array.isArray(preset?.categories) || preset.categories.length === 0) return;
+    const container = document.getElementById("grading-weight-rows");
+    if (!container) return;
+
+    const existing = Array.from(container.querySelectorAll(".grading-weight-row"));
+    const hasNamedCategory = existing.some(
+        row => row.querySelector(".grading-category-name")?.value.trim()
+    );
+    if (hasNamedCategory) return;
+
+    const section = document.getElementById("score-section")?.value || "";
+    container.innerHTML = preset.categories
+        .map(category => gradingCategoryRowMarkup({
+            id: newCategoryId(),
+            section,
+            name: category.name,
+            weight: category.weight,
+            items: sanitizeCategoryItems(null, category.items || 1)
+        }))
+        .join("");
+    refreshIcons();
+    updateGradingTotals();
+}
+
+function addGradingPeriodRow() {
+    const rows = document.getElementById("grading-period-rows");
+    if (!rows) return;
+    if (rows.querySelectorAll(".grading-period-row").length >= 12) {
+        setGradingSetupError("A section can have at most 12 grading periods.");
+        return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = gradingPeriodRowMarkup();
+    const row = wrapper.firstElementChild;
+    rows.appendChild(row);
+    refreshIcons();
+    row.querySelector(".grading-period-name").focus();
+}
+
+function removeGradingPeriodRow(button) {
+    const row = button.closest(".grading-period-row");
+    if (row) row.remove();
+}
+
+/** Read the scheme editor; returns { scheme } or { error }. */
+function readSchemeFromModal() {
+    const presetKey = document.getElementById("grading-preset")?.value || "legacy";
+    const finalRule = document.getElementById("grading-final-rule")?.value === "weighted" ? "weighted" : "average";
+    const transmute = Boolean(document.getElementById("grading-transmute")?.checked);
+    const rowElements = Array.from(document.querySelectorAll("#grading-period-rows .grading-period-row"));
+
+    const periods = [];
+    const seen = new Set();
+    for (const row of rowElements) {
+        const name = row.querySelector(".grading-period-name").value.trim();
+        const weightRaw = row.querySelector(".grading-period-weight").value.trim();
+        if (!name) continue;
+        if (name.length > 40) return { error: "Period names must be 40 characters or fewer." };
+        if (name.toLowerCase() === "general") {
+            return { error: '"General" is reserved for unassigned scores — pick another period name.' };
+        }
+        if (seen.has(name.toLowerCase())) return { error: `Duplicate grading period: ${name}.` };
+        seen.add(name.toLowerCase());
+        let weight = null;
+        if (weightRaw !== "") {
+            weight = Number(weightRaw);
+            if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
+                return { error: `Enter a share from 0 to 100 for ${name}.` };
+            }
+        }
+        periods.push({ name, weight });
+    }
+
+    if (periods.length === 0) return { scheme: null };
+    if (finalRule === "weighted") {
+        const total = periods.reduce((sum, period) => sum + (period.weight ?? 0), 0);
+        if (total <= 0) return { error: "Weighted periods need at least one share above 0%." };
+    }
+    return { scheme: sanitizeGradingScheme({ preset: presetKey, periods, finalRule, transmute }) };
+}
+
+function setSectionSchemeLocally(section, scheme) {
+    if (!section) return null;
+    const clean = sanitizeGradingScheme(scheme);
+    if (clean) state.gradingSchemes[section] = clean;
+    else delete state.gradingSchemes[section];
+    localMutationSeq++;
+    return clean;
+}
+
+async function persistSectionScheme(section, scheme) {
+    const clean = setSectionSchemeLocally(section, scheme);
+    saveLocalStore();
+    populatePeriodSelect();
+    renderGradeSummary();
+    return trySync({ t: "gradingScheme", section, scheme: clean });
+}
+
 function openGradingSetup() {
     const section = document.getElementById("score-section")?.value || "";
     if (!section) {
@@ -3009,6 +3576,7 @@ function openGradingSetup() {
         return;
     }
     document.getElementById("grading-setup-section").textContent = `Section: ${section} · applies only to this section`;
+    renderGradingPeriodRows(getSectionScheme(section));
     const sectionCategories = getSectionGradeCategories(section);
     const rows = document.getElementById("grading-weight-rows");
     rows.innerHTML = sectionCategories.length > 0
@@ -3088,11 +3656,21 @@ async function saveGradingSetup(event) {
         ...state.gradeCategories.filter(category => category.section !== section),
         ...categories
     ];
+    const schemeResult = readSchemeFromModal();
+    if (schemeResult.error) {
+        setGradingSetupError(schemeResult.error);
+        return;
+    }
+
     state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
     refreshScoreCategoryMetadata(state.gradeCategories);
+    // Local first (periods + categories together), so the sheet never renders
+    // with the previous period structure.
+    const savedScheme = setSectionSchemeLocally(section, schemeResult.scheme);
     localMutationSeq++;
     saveLocalStore();
     closeModal("modal-grading-setup");
+    populatePeriodSelect();
     loadScoreSheet();
 
     if (cloudReady()) {
@@ -3102,7 +3680,7 @@ async function saveGradingSetup(event) {
             categories,
             selectedIds: categories.map(c => c.id)
         });
-        if (!synced) return;
+        if (synced) await trySync({ t: "gradingScheme", section, scheme: savedScheme });
     }
     showToast(`Grading setup saved for ${section}.`, "success");
 }
@@ -3378,6 +3956,62 @@ function saveScoreSheetCsv() {
     showToast(`Grades CSV saved (${secStudents.length} students).`, "success");
 }
 
+function saveGradeSummaryCsv() {
+    const sec = document.getElementById("score-section")?.value || "";
+    const date = document.getElementById("score-date")?.value || todayStr();
+    if (!sec) {
+        showToast("Please select a section first.", "error");
+        return;
+    }
+    const secStudents = state.students.filter(s => s.section === sec);
+    if (secStudents.length === 0) {
+        showToast("There are no students in this section to save.", "error");
+        return;
+    }
+    if (!window.SchologCsv) {
+        showToast("The CSV builder did not load. Refresh the page and try again.", "error");
+        return;
+    }
+
+    const sample = calculateSectionFinalGrade(secStudents[0].student_id, sec);
+    // Columns must follow the section's periods even before anyone has a score.
+    const legacyPeriods = sample.scheme ? [] : getLegacyPeriodsInUse(sec);
+    const periods = sample.scheme
+        ? sample.scheme.periods.map(period => period.name)
+        : (legacyPeriods.length > 0 ? legacyPeriods : ["Quarter 1", "Quarter 2", "Quarter 3", "Quarter 4"]);
+
+    const students = secStudents.map(stud => {
+        const result = calculateSectionFinalGrade(stud.student_id, sec);
+        const perPeriod = {};
+        result.periods.forEach(entry => {
+            perPeriod[entry.period] = entry.grade == null ? null : Number(entry.grade.toFixed(2));
+        });
+        return {
+            student_id: stud.student_id,
+            name: stud.name,
+            periods: perPeriod,
+            final: result.final == null ? null : Number(result.final.toFixed(2)),
+            raw: result.raw == null ? null : Number(result.raw.toFixed(2)),
+            transmuted: result.transmuted,
+            descriptor: result.descriptor
+        };
+    });
+
+    const csv = window.SchologCsv.buildGradeSummaryCsv({
+        section: sec,
+        structure: sample.label,
+        rule: sample.rule === "weighted" ? "Weighted periods" : "Average of periods",
+        transmuted: Boolean(sample.scheme?.transmute),
+        date,
+        generatedAt: new Date(),
+        periods,
+        students
+    });
+
+    triggerCsvSave(csv.filename, csv.text);
+    showToast(`Final grades CSV saved (${secStudents.length} students).`, "success");
+}
+
 // --- Cloud refresh (picks up QR / Student-ID check-ins saved by students) ---
 let lastCloudSyncAt = 0;
 
@@ -3410,7 +4044,10 @@ async function syncLatestFromCloud() {
     saveLocalStore();
     populateSectionDropdowns();
     loadAttendanceSheet();
-    if (activeTab === "scores") loadScoreSheet();
+    if (activeTab === "scores") {
+        populatePeriodSelect();
+        loadScoreSheet();
+    }
     if (activeTab === "dashboard") renderDashboard();
     if (activeTab === "directory") renderDirectory();
 

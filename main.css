@@ -2377,3 +2377,105 @@ body.auth-pending {
 #main-content:focus {
     outline: none;
 }
+
+/* --- Grading schemes: terms for high school, periods for college --------- */
+
+.grading-scheme-block,
+.grading-category-block {
+    margin: 0 0 4px;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+}
+
+.grading-scheme-block {
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.grading-scheme-block legend,
+.grading-category-block legend {
+    padding: 0;
+    margin-bottom: 8px;
+    color: var(--text-main);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.grading-scheme-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+    .grading-scheme-controls { grid-template-columns: minmax(0, 1fr); }
+}
+
+.field-hint {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.checkbox-row input { margin-top: 2px; flex: 0 0 auto; }
+
+.grading-period-head,
+.grading-period-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px 36px;
+    align-items: center;
+    gap: 10px;
+}
+
+.grading-period-rows { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.grading-period-row .grading-period-weight { text-align: right; }
+.grading-period-remove {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.grading-period-remove:hover {
+    border-color: var(--rose-border);
+    background: var(--rose-bg);
+    color: var(--rose-text);
+}
+
+.grade-summary-table td:first-child { white-space: nowrap; }
+.grade-summary-table td:nth-child(n + 3) { text-align: right; }
+.grade-summary-table th:nth-child(n + 3) { text-align: right; }
+.grade-summary-table td:last-child { text-align: left; }
+.grade-summary-table th:last-child { text-align: left; }
+.grade-cell-missing { color: var(--text-muted); }
+.grade-transmuted { display: block; color: var(--amber-text); font-size: 11px; font-weight: 500; }
+
+@media (max-width: 480px) {
+    .grading-period-head,
+    .grading-period-row {
+        grid-template-columns: minmax(0, 1fr) 84px 32px;
+        gap: 6px;
+    }
+}

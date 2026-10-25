@@ -26,7 +26,7 @@ bug that only hides values in the UI still shows up.
 | --- | --- | --- | --- |
 | 1 | UI centred and responsive | **PASS** (static) | `.main-container` `max-width:1280px; margin:0 auto`, `.scan-main` `max-width:760px; margin:0 auto`, `style.css` `body{display:flex; justify-content:center}` + `.container{max-width:440px; margin:auto}`. 35 media queries in `main.css`, 6 in `scan.css`, smallest breakpoint 360px. All three `data-table`s are inside `.table-responsive{overflow-x:auto}` so a 620px sheet scrolls instead of pushing the page sideways. Not verified in a real browser (none in this environment). |
 | 2 | Login works separately for student and teacher | **PASS, but the premise is wrong** | Only teachers have accounts (`index.html` Sign In / Create Account → Supabase Auth). Students never log in: they scan a QR (`index.html` → Scan QR → `scan.html`) or look up their record (`student-record.html` + 8-char record code). `tests/audit.test.mjs` asserts the student surface contains no `password` field and no `signInWithPassword` call. |
-| 3 | Class list, attendance, scores correct | **PASS on the mechanics, FAIL on DepEd policy** | Create/edit/delete, duplicate-ID refusal, per-section roster, attendance save, score save and sheet recalculation all covered and green. But the grading engine still implements the **repealed** DO 8 s. 2015 (Q1–Q4, free-form weights) instead of DO 015 s. 2026 (three terms, WW/PT/EX, 70-raw → 75-transmuted). That is a policy-compliance defect, not a crash, and it is the biggest remaining correctness gap. |
+| 3 | Class list, attendance, scores correct | **PASS** | Create/edit/delete, duplicate-ID refusal, per-section roster, attendance save, score save and sheet recalculation all covered and green. The grading engine now supports **both** school levels per section: DepEd DO 015 s. 2026 terms (WW 30 / PT 30 / EX 40, transmutation, descriptors) and college periods (Prelim/Midterm/Semi-Final/Final, average or weighted). See `## Grading schemes` in the README. |
 | 4 | Invalid input is caught | **PASS after 3 fixes** | 7 hostile tests: blank/whitespace name and ID refused; duplicate ID refused in the form *and* on edit; HTML in a name escaped; apostrophes/quotes survive inline `onclick` arguments; scores 999 / −5 / `abc` / empty refused; unknown attendance status refused (**was broken — fixed**); HTML/regex/SQL metacharacters in search are inert. |
 | 5 | 10,000 concurrent users | **NOT TESTABLE HERE** | No reachable database (this sandbox can only reach github/npm/pypi) and no staging project. Analysis + runnable k6 harness delivered: `docs/LOAD_TEST.md`, `scripts/loadtest/k6-checkin.js`. Headline: reads, not writes, are the ceiling. |
 | 6 | QR generation and scanning | **PASS** | Payload round-trips: `SCHOLOG:2026-0001:K7M2QPX9` when the student has a record code, `SCHOLOG:2026-0002` otherwise. Scanner page handles camera start/stop, duplicate-device rejection and the single-session token (`tests/ui-scan.test.mjs`, `tests/record-access.test.mjs`). |
@@ -99,9 +99,9 @@ and `students (lower(record_code))`.
 
 ## Recommended next steps, in order
 
-1. **DO 015 s. 2026 term-grade engine + SF9** — the grading engine is the only
-   place where the app can produce a *wrong number a parent will sign*. Everything
-   else in this audit is infrastructure.
+1. **SF9 (Report Card) from the term grades** — the term engine now exists, but
+   the printable card does not. This is the last place where the app can produce
+   a *wrong number a parent will sign*.
 2. Apply the three new migrations the next time you deploy (client change goes
    with the attendance allow-list; old clients stay compatible).
 3. Run the k6 harness on staging, then replace the 30-second full-state poll with

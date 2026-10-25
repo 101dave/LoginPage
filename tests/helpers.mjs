@@ -31,6 +31,8 @@ export function defaultDb() {
         scores: [],
         grading_categories: [],
         section_grading_categories: [],
+        // Per-section period structure (terms for DepEd, periods for college).
+        section_grading_schemes: [],
         checkin_sessions: []
     };
 }
@@ -184,6 +186,29 @@ class QueryBuilder {
                                     }
                                 };
                             }
+                        }
+                    }
+                }
+                if (this.table === "section_grading_schemes") {
+                    for (const row of input) {
+                        if (row.final_rule && !["average", "weighted"].includes(row.final_rule)) {
+                            return {
+                                data: null,
+                                error: {
+                                    code: "23514",
+                                    message: 'new row for relation "section_grading_schemes" violates check constraint "section_grading_schemes_final_rule_check"'
+                                }
+                            };
+                        }
+                        const periods = Array.isArray(row.periods) ? row.periods : [];
+                        if (periods.length < 1 || periods.length > 12) {
+                            return {
+                                data: null,
+                                error: {
+                                    code: "23514",
+                                    message: 'new row for relation "section_grading_schemes" violates check constraint "section_grading_schemes_periods_nonempty"'
+                                }
+                            };
                         }
                     }
                 }

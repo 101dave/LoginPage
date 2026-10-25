@@ -235,6 +235,68 @@
         };
     }
 
+    /**
+     * Final-grade report: one row per learner, one column per grading period,
+     * then the combined grade and its descriptor.
+     * @param {{
+     *   section:string, structure?:string, rule?:string, transmuted?:boolean,
+     *   date?:Date|string, generatedAt?:Date|string,
+     *   periods?:Array<string>,
+     *   students?:Array<{student_id:string, name:string,
+     *                    periods?:Object<string, number|null>,
+     *                    final?:number|null, raw?:number|null,
+     *                    transmuted?:boolean, descriptor?:string}>
+     * }} model
+     * @returns {{filename:string, rows:Array<Array>, text:string}}
+     */
+    function buildGradeSummaryCsv(model) {
+        var options = model || {};
+        var periods = Array.isArray(options.periods) ? options.periods : [];
+        var students = Array.isArray(options.students) ? options.students : [];
+        var rows = [];
+
+        rows.push(["Scholog — Final Grades"]);
+        rows.push(["Section", options.section || ""]);
+        rows.push(["Structure", options.structure || ""]);
+        rows.push(["Final grade rule", options.rule || ""]);
+        rows.push(["Transmutation", options.transmuted ? "On (raw below 70 is recorded as 75)" : "Off"]);
+        rows.push(["As of", formatDate(options.date)]);
+
+        rows.push([]);
+        var header = ["Student ID", "Student Name"].concat(periods, ["Final Grade", "Descriptor", "Note"]);
+        rows.push(header);
+
+        var graded = [];
+        students.forEach(function (student) {
+            var perPeriod = student.periods || {};
+            var row = [String(student.student_id == null ? "" : student.student_id),
+                String(student.name == null ? "" : student.name)];
+            periods.forEach(function (period) {
+                var value = perPeriod[period];
+                row.push(isNumber(Number(value)) && value != null && value !== "" ? Number(value) : "");
+            });
+            var final = student.final;
+            row.push(isNumber(Number(final)) && final != null ? Number(final) : "");
+            row.push(student.descriptor || "");
+            row.push(student.transmuted ? "Transmuted from " + Number(student.raw).toFixed(2) : "");
+            if (isNumber(Number(final)) && final != null) graded.push(Number(final));
+            rows.push(row);
+        });
+
+        rows.push([]);
+        rows.push(["Class average", graded.length > 0 ? Number((graded.reduce(function (sum, value) { return sum + value; }, 0) / graded.length).toFixed(2)) : ""]);
+        rows.push(["Students with a final grade", graded.length + " of " + students.length]);
+        rows.push(["Generated", formatStamp(options.generatedAt || new Date())]);
+        rows.push(["Note", "Each period column is that period's weighted percentage. The final grade combines them by the section's rule."]);
+
+        var section = sanitizeFilenamePart(options.section, "Section");
+        return {
+            filename: ["FinalGrades", section, ymd(options.date)].join("_") + ".csv",
+            rows: rows,
+            text: gridToCsv(rows)
+        };
+    }
+
     var api = {
         VERSION: "1.0.0",
         ROW_JOINER: ROW_JOINER,
@@ -246,7 +308,8 @@
         formatStamp: formatStamp,
         ymd: ymd,
         buildScoreSheetFilename: buildScoreSheetFilename,
-        buildScoreSheetCsv: buildScoreSheetCsv
+        buildScoreSheetCsv: buildScoreSheetCsv,
+        buildGradeSummaryCsv: buildGradeSummaryCsv
     };
 
     root.SchologCsv = api;
