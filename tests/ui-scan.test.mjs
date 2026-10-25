@@ -632,3 +632,95 @@ test("checking in reveals View my record button with session token and student-r
     assert.match(blockedPage.window.document.getElementById("notfound-title").textContent, /Access restricted/i);
 });
 
+test("smart live projector QR: auto-late grace timer, live check-in feed & pop-up alert, sound toggle, and student Late check-in", async (t) => {
+    const db = defaultDb();
+    db.attendance = db.attendance.filter((row) => row.student_id !== "2026-0003");
+    const { window, dom } = bootScan({ url: "https://scholog.test/scan.html", session: userSession(), db });
+    t.after(() => dom.window.close());
+    const document = window.document;
+
+    await waitFor(() => !document.getElementById("view-host").classList.contains("hidden"));
+    await waitFor(() => document.getElementById("host-section").options.length === 2);
+
+    document.getElementById("host-section").value = "Grade 11 - STEM";
+    document.getElementById("host-late-after").value = "15";
+    document.getElementById("session-form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => !document.getElementById("host-session").classList.contains("hidden"));
+    assert.ok(db.checkin_sessions[0].late_after_at, "late_after_at timestamp saved on session");
+    assert.match(document.getElementById("host-timer-pill").textContent, /On-Time Window/i);
+
+    // Open fullscreen projector
+    document.getElementById("present-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(document.getElementById("presentation-present-count").textContent, "1");
+    assert.equal(document.getElementById("presentation-late-count").textContent, "1");
+    assert.equal(document.getElementById("presentation-pending-count").textContent, "1");
+
+    // Simulate Lea Reyes (2026-0003) scanning in and refreshing the roster -> triggers Live Pop-Up & Feed update
+    db.attendance.push({
+        id: 99,
+        user_id: "user-1",
+        date: todayStr(),
+        student_id: "2026-0003",
+        status: "Present",
+        subject: "General"
+    });
+    document.getElementById("refresh-roster-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+
+    await waitFor(() => !document.getElementById("presentation-live-pop").classList.contains("hidden"), {
+        label: "live projector pop-up alert shown"
+    });
+    assert.match(document.getElementById("presentation-live-pop").textContent, /Lea Reyes/);
+    assert.match(document.getElementById("presentation-feed-list").textContent, /Lea Reyes/);
+    assert.equal(document.getElementById("presentation-checked").textContent, "3");
+
+    // Toggle Mark Late Now -> switches session into Late Mode Active
+    document.getElementById("host-late-toggle-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await waitFor(() => /Late Mode Active/i.test(document.getElementById("host-timer-pill").textContent));
+    assert.match(document.getElementById("presentation-timer-pill").textContent, /Late Mode Active/i);
+
+    // Toggle Sound button
+    document.getElementById("presentation-sound-btn").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    assert.equal(document.getElementById("presentation-sound-btn").getAttribute("aria-pressed"), "false");
+    assert.match(document.getElementById("presentation-sound-btn").textContent, /Muted/i);
+
+    // Student view during Late window shows Late banner and marks student Late
+    const lateStudentScan = bootScan({
+        handler: (fn) => {
+            if (fn === "checkin_session_info") {
+                return {
+                    data: sessionInfo({
+                        late_after_at: new Date(Date.now() - 60_000).toISOString(),
+                        late_mode: true
+                    })
+                };
+            }
+            if (fn === "checkin_mark") {
+                return {
+                    data: {
+                        ok: true,
+                        student_name: "Lea Reyes",
+                        student_id: "2026-0003",
+                        status: "Late",
+                        already_marked: false,
+                        student_count: 3,
+                        checked_in: 3
+                    }
+                };
+            }
+            return { data: {} };
+        }
+    });
+    t.after(() => lateStudentScan.dom.window.close());
+    const sDoc = lateStudentScan.window.document;
+    await waitFor(() => !sDoc.getElementById("view-student").classList.contains("hidden"));
+    assert.equal(sDoc.getElementById("student-late-banner").classList.contains("hidden"), false);
+    assert.match(sDoc.getElementById("student-late-banner").textContent, /marks you Late/i);
+
+    sDoc.getElementById("student-id-input").value = "2026-0003";
+    sDoc.getElementById("id-form").dispatchEvent(new lateStudentScan.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => !sDoc.getElementById("result").classList.contains("hidden"));
+    assert.match(sDoc.getElementById("result-title").textContent, /marked Late/i);
+});
+
+
