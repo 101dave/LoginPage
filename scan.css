@@ -167,11 +167,11 @@ body {
 .panel-title { margin-bottom: 4px; }
 
 .muted { color: var(--text-muted); }
-.small { font-size: 11px; }
+.small { font-size: 12px; }
 .eyebrow {
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 10px !important;
+    font-size: 11px !important;
     font-weight: 700;
     color: var(--text-muted);
 }
@@ -225,7 +225,7 @@ body {
 }
 
 .class-strip-label {
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: 700;
@@ -254,7 +254,7 @@ body {
     gap: 5px;
     padding: 3px 9px;
     border-radius: 999px;
-    font-size: 10.5px;
+    font-size: 11.5px;
     font-weight: 700;
     background: var(--emerald-bg);
     color: var(--emerald-text);
@@ -281,7 +281,7 @@ body {
 }
 
 .progress-label {
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--text-muted);
     text-align: right;
@@ -597,7 +597,7 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 }
 
 .recent-label {
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     font-weight: 700;
@@ -744,7 +744,7 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 }
 
 .stat-value { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
-.stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 700; }
+.stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 700; }
 
 .roster {
     list-style: none;
@@ -771,7 +771,7 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 .roster .code { color: var(--text-muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .pill {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     padding: 3px 8px;
     border-radius: 999px;
@@ -934,7 +934,7 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 
 .device-rule::before {
     content: "1×";
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 800;
     color: var(--text-main);
     background: #fff;

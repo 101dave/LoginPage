@@ -192,6 +192,36 @@ The app is plain static files, so page weight *is* the performance story:
   student taps the scanner, never on page load.
 - **PDF** — jsPDF + AutoTable (~395 KB) load only when a teacher exports.
 
+## Responsive behaviour
+
+The app is used on a staffroom laptop and on a phone held in a corridor, so the
+layout is checked at 320px upward, not just on a desktop.
+
+- **Categories & Weights modal.** Below 560px each four-column row becomes a
+  labelled card: the category name keeps a readable width (~170px at 360px, where
+  the old fixed grid left it ~50px), and the subsection count and weight move
+  underneath with their own labels. Inputs are 44px tall with **16px** text —
+  smaller text makes iOS Safari zoom the page when a field takes focus.
+- **Modals** cap their height with `dvh` so the Save button is not parked under
+  the mobile browser toolbar, and the footer buttons go full width under 420px.
+- **Text floor.** Instructional copy, hints, table headers and status labels are
+  at least 12px; nothing in the app is below 11px, and the 11px cases are short
+  uppercase chips (badges, weekday initials).
+- **Long content** wraps (`overflow-wrap: anywhere` on cards, modals and table
+  cells) and wide tables scroll inside `.table-responsive` instead of pushing the
+  page sideways.
+
+`tests/responsive.test.mjs` measures all of this from the shipped CSS — grid
+column widths at 320/360/390/414px, the 44px/16px touch rules, the 12px text
+floor, and WCAG AA contrast for every text colour in the modal (4.5:1).
+
+To look at the modal at real widths without a Supabase login:
+
+```bash
+npm run preview:modal     # writes preview/grading-modal.html
+npm run serve             # then open /preview/grading-modal.html
+```
+
 ## Grading schemes (high school and college)
 
 One account can handle a high-school section and a college block, because the

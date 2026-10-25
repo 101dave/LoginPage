@@ -1,3 +1,6 @@
 node_modules/
 .DS_Store
 *.log
+
+# Generated layout preview (npm run preview:modal)
+preview/
