@@ -18,7 +18,9 @@
     const RPC_TIMEOUT_MS = 12000;
     const DEVICE_KEY = "scholog_device_id";
     const LOCK_KEY = "scholog_checkin_lock";
+    const SOUND_KEY = "scholog_projector_sound";
     const RECENT_LIMIT = 5;
+    const FEED_LIMIT = 8;
 
     const $ = (id) => document.getElementById(id);
 
@@ -27,6 +29,13 @@
         sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
     } catch (err) {
         console.error("Supabase init failed:", err);
+    }
+
+    let initialSoundEnabled = true;
+    try {
+        initialSoundEnabled = localStorage.getItem(SOUND_KEY) !== "off";
+    } catch (err) {
+        initialSoundEnabled = true;
     }
 
     const state = {
@@ -38,6 +47,8 @@
         rosterTimer: null,
         infoTimer: null,
         resumeTimer: null,
+        countdownTimer: null,
+        livePopTimer: null,
         submitting: false,
         lastCode: "",
         lastCodeAt: 0,
@@ -47,6 +58,11 @@
         autoScanAttempted: false,
         cameraBlocked: false,
         deviceLocked: false,
+        soundEnabled: initialSoundEnabled,
+        audioCtx: null,
+        rosterSeededForToken: "",
+        knownCheckins: new Map(),
+        liveFeed: [],
         recent: []
     };
 
@@ -135,9 +151,168 @@
         if (state.rosterTimer) clearInterval(state.rosterTimer);
         if (state.infoTimer) clearInterval(state.infoTimer);
         if (state.resumeTimer) clearTimeout(state.resumeTimer);
+        if (state.countdownTimer) clearInterval(state.countdownTimer);
+        if (state.livePopTimer) clearTimeout(state.livePopTimer);
         state.rosterTimer = null;
         state.infoTimer = null;
         state.resumeTimer = null;
+        state.countdownTimer = null;
+        state.livePopTimer = null;
+    }
+
+    function formatCountdown(ms) {
+        const totalSec = Math.max(0, Math.ceil(ms / 1000));
+        const hrs = Math.floor(totalSec / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        const secs = totalSec % 60;
+        if (hrs > 0) {
+            return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+        }
+        return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+
+    function playCheckinChime(status = "Present") {
+        if (!state.soundEnabled) return false;
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return false;
+            if (!state.audioCtx) state.audioCtx = new AudioCtx();
+            const ctx = state.audioCtx;
+            if (ctx.state === "suspended" && typeof ctx.resume === "function") {
+                ctx.resume().catch(() => {});
+            }
+            const now = ctx.currentTime || 0;
+            const freqs = status === "Late" ? [659.25, 523.25] : [523.25, 783.99];
+            freqs.forEach((freq, idx) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(freq, now + idx * 0.11);
+                gain.gain.setValueAtTime(0.14, now + idx * 0.11);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.11 + 0.24);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + idx * 0.11);
+                osc.stop(now + idx * 0.11 + 0.25);
+            });
+            return true;
+        } catch (err) {
+            return false;
+        }
+    }
+
+    function syncSoundButtons() {
+        const label = state.soundEnabled ? "Sound: On" : "Sound: Muted";
+        ["host-sound-btn", "presentation-sound-btn"].forEach((id) => {
+            const btn = $(id);
+            if (!btn) return;
+            btn.textContent = label;
+            btn.setAttribute("aria-pressed", String(state.soundEnabled));
+            btn.classList.toggle("sound-muted", !state.soundEnabled);
+        });
+    }
+
+    function toggleProjectorSound() {
+        state.soundEnabled = !state.soundEnabled;
+        try {
+            localStorage.setItem(SOUND_KEY, state.soundEnabled ? "on" : "off");
+        } catch (err) { /* ignore */ }
+        syncSoundButtons();
+        if (state.soundEnabled) {
+            playCheckinChime("Present");
+            showToast("Check-in sound enabled");
+        } else {
+            showToast("Check-in sound muted");
+        }
+    }
+
+    function startCountdownLoop() {
+        if (state.countdownTimer) clearInterval(state.countdownTimer);
+        updateSmartTimers();
+        state.countdownTimer = setInterval(updateSmartTimers, 1000);
+    }
+
+    function updateSmartTimers() {
+        const now = Date.now();
+
+        // Student mode banner
+        if (state.mode === "student" && state.session) {
+            const banner = $("student-late-banner");
+            const submit = $("submitIdBtn");
+            const closed = Boolean(state.session.closed);
+            const expired = Boolean(state.session.expired) || (state.session.expires_at && new Date(state.session.expires_at).getTime() < now);
+            const open = !closed && !expired;
+            const lateAt = state.session.late_after_at ? new Date(state.session.late_after_at).getTime() : null;
+
+            if (banner) {
+                if (!open || (!lateAt && !state.session.late_mode)) {
+                    banner.classList.add("hidden");
+                } else {
+                    banner.classList.remove("hidden");
+                    const isLateNow = Boolean(state.session.late_mode) || (lateAt !== null && lateAt <= now);
+                    banner.classList.toggle("timer-late", isLateNow);
+                    banner.classList.toggle("timer-ontime", !isLateNow);
+                    if (isLateNow) {
+                        banner.textContent = "Late check-in window — checking in now marks you Late";
+                        if (submit && !state.submitting) submit.textContent = "Mark me Late";
+                    } else {
+                        banner.textContent = `On-time check-in window · ${formatCountdown(lateAt - now)} left before Late`;
+                        if (submit && !state.submitting) submit.textContent = "Mark me Present";
+                    }
+                }
+            }
+        }
+
+        // Host & Projector mode timers
+        if (state.mode === "host" && state.hostSession) {
+            const session = state.hostSession;
+            const expMs = session.expires_at ? new Date(session.expires_at).getTime() - now : 0;
+            const closed = Boolean(session.closed);
+            const expired = expMs <= 0;
+            const lateAt = session.late_after_at ? new Date(session.late_after_at).getTime() : null;
+
+            const expText = closed
+                ? "Session closed"
+                : (expired ? "Session expired" : `Closes in ${formatCountdown(expMs)}`);
+            if ($("host-expiry-pill")) $("host-expiry-pill").textContent = expText;
+            if ($("presentation-expiry-pill")) $("presentation-expiry-pill").textContent = expText;
+
+            let pillText = "Present Mode · No Late Cutoff";
+            let pillClass = "smart-timer-pill timer-pill-ontime";
+            let toggleLabel = "Mark Late Now";
+
+            if (closed || expired) {
+                pillText = closed ? "Session Closed" : "Session Expired";
+                pillClass = "smart-timer-pill timer-pill-muted";
+            } else if (lateAt !== null) {
+                if (lateAt > now) {
+                    pillText = `On-Time Window · ${formatCountdown(lateAt - now)} left`;
+                    pillClass = "smart-timer-pill timer-pill-ontime";
+                    toggleLabel = "Mark Late Now";
+                } else {
+                    pillText = "Late Mode Active · New scans marked Late";
+                    pillClass = "smart-timer-pill timer-pill-late";
+                    toggleLabel = "Reopen On-Time (+5m)";
+                }
+            }
+
+            ["host-timer-pill", "presentation-timer-pill"].forEach((id) => {
+                const el = $(id);
+                if (!el) return;
+                el.textContent = pillText;
+                el.className = pillClass;
+            });
+
+            ["host-late-toggle-btn", "presentation-late-toggle-btn"].forEach((id) => {
+                const btn = $(id);
+                if (!btn) return;
+                btn.textContent = toggleLabel;
+                btn.disabled = closed || expired;
+            });
+
+            const extendBtn = $("host-extend-late-btn");
+            if (extendBtn) extendBtn.disabled = closed || expired;
+        }
     }
 
     function getTokenFromUrl() {
@@ -431,6 +606,8 @@
             tabId.disabled = !open;
             if (!open) stopScanner();
         }
+
+        startCountdownLoop();
     }
 
     async function submitStudentId(rawCode, options = {}) {
@@ -480,9 +657,10 @@
             const data = await rpc("checkin_mark", body);
             if (data && data.ok) {
                 const name = data.student_name || "Student";
+                const markedStatus = data.status === "Late" ? "Late" : "Present";
                 const detail = data.already_marked
-                    ? `${name} (${data.student_id}) was already on the list — attendance confirmed as Present.`
-                    : `${name} (${data.student_id}) is marked Present for ${formatDate(state.session.date)}.`;
+                    ? `${name} (${data.student_id}) was already on the list — attendance confirmed as ${markedStatus}.`
+                    : `${name} (${data.student_id}) is marked ${markedStatus} for ${formatDate(state.session.date)}.`;
 
                 addRecent(data.student_name, data.student_id);
 
@@ -498,6 +676,7 @@
                     token: state.token,
                     studentId: data.student_id,
                     name: data.student_name || "Student",
+                    status: markedStatus,
                     userId,
                     at: Date.now()
                 });
@@ -505,9 +684,14 @@
 
                 // Point "View my record" to the student's attendance + score record page.
                 const recordUrl = buildStudentRecordUrl(data.student_id, userId);
+                const resultTitle = data.already_marked
+                    ? "Already checked in"
+                    : (markedStatus === "Late"
+                        ? `${name.split(" ")[0]}, you're marked Late`
+                        : `${name.split(" ")[0]}, you're Present!`);
 
                 showResult(data.already_marked ? "info" : "success",
-                    data.already_marked ? "Already checked in" : `${name.split(" ")[0]}, you're Present!`,
+                    resultTitle,
                     detail,
                     { locked: true, recordUrl });
 
@@ -884,6 +1068,8 @@
         const section = $("host-section").value;
         const date = $("host-date").value;
         const minutes = Number($("host-duration").value) || 60;
+        const lateMinutesRaw = $("host-late-after") ? Number($("host-late-after").value) : 0;
+        const lateMinutes = Number.isFinite(lateMinutesRaw) && lateMinutesRaw > 0 ? lateMinutesRaw : 0;
 
         if (!section) {
             $("host-form-hint").textContent = "Choose a section first.";
@@ -899,22 +1085,43 @@
         btn.textContent = "Creating…";
 
         try {
-            const expiresAt = new Date(Date.now() + minutes * 60 * 1000).toISOString();
-            const { data, error } = await sb
+            const nowMs = Date.now();
+            const expiresAt = new Date(nowMs + minutes * 60 * 1000).toISOString();
+            const lateAfterAt = lateMinutes > 0
+                ? new Date(nowMs + Math.min(lateMinutes, minutes) * 60 * 1000).toISOString()
+                : null;
+            const insertPayload = {
+                user_id: state.currentUser.id,
+                section,
+                attendance_date: date,
+                expires_at: expiresAt,
+                late_after_at: lateAfterAt,
+                closed: false
+            };
+
+            let { data, error } = await sb
                 .from("checkin_sessions")
-                .insert({
-                    user_id: state.currentUser.id,
-                    section,
-                    attendance_date: date,
-                    expires_at: expiresAt,
-                    closed: false
-                })
-                .select("token, section, attendance_date, expires_at, closed")
+                .insert(insertPayload)
+                .select("token, section, attendance_date, expires_at, late_after_at, closed")
                 .single();
+            if (error && /late_after_at/i.test(String(error.message || ""))) {
+                delete insertPayload.late_after_at;
+                ({ data, error } = await sb
+                    .from("checkin_sessions")
+                    .insert(insertPayload)
+                    .select("token, section, attendance_date, expires_at, closed")
+                    .single());
+            }
             if (error) throw error;
 
+            if (data && data.late_after_at === undefined) {
+                data.late_after_at = lateAfterAt;
+            }
             state.hostSession = data;
-            saveHostSession(data.token);
+            state.rosterSeededForToken = "";
+            state.knownCheckins.clear();
+            state.liveFeed = [];
+            saveHostSession(data.token, data.late_after_at);
             $("host-form-hint").textContent = "";
             await renderHostSession();
             showToast("Check-in ready — share the QR or link");
@@ -930,15 +1137,25 @@
 
     async function resumeHostSession(token) {
         try {
-            const { data, error } = await sb
+            let { data, error } = await sb
                 .from("checkin_sessions")
-                .select("token, section, attendance_date, expires_at, closed")
+                .select("token, section, attendance_date, expires_at, late_after_at, closed")
                 .eq("token", token)
                 .maybeSingle();
+            if (error && /late_after_at/i.test(String(error.message || ""))) {
+                ({ data, error } = await sb
+                    .from("checkin_sessions")
+                    .select("token, section, attendance_date, expires_at, closed")
+                    .eq("token", token)
+                    .maybeSingle());
+            }
             if (error) throw error;
             if (!data) {
                 clearSavedHostSession();
                 return false;
+            }
+            if (data.late_after_at === undefined) {
+                data.late_after_at = readSavedHostLateAfter() || null;
             }
             state.hostSession = data;
             await renderHostSession();
@@ -976,12 +1193,14 @@
         $("close-session-btn").disabled = closed;
         $("present-btn").disabled = closed || expired;
 
+        syncSoundButtons();
+        startCountdownLoop();
         await loadRoster();
 
         if (state.rosterTimer) clearInterval(state.rosterTimer);
         state.rosterTimer = setInterval(() => {
             if (document.visibilityState === "visible") loadRoster(true);
-        }, 5000);
+        }, 4000);
     }
 
     function renderQr(container, url) {
@@ -1000,6 +1219,103 @@
             console.error("QR generation failed:", err);
             container.textContent = "Could not draw the QR code — copy the link instead.";
         }
+    }
+
+    function renderProjectorFeed() {
+        const feedList = $("presentation-feed-list");
+        if (!feedList) return;
+        if (state.liveFeed.length === 0) {
+            feedList.innerHTML = `<li class="presentation-feed-empty">Waiting for students to scan…</li>`;
+            return;
+        }
+        feedList.innerHTML = state.liveFeed.slice(0, FEED_LIMIT).map((item, idx) => {
+            const pillClass = item.status === "Late" ? "pill-late" : "pill-present";
+            const freshClass = idx === 0 && item.isNew ? " feed-item-fresh" : "";
+            return `<li class="presentation-feed-item${freshClass}">
+                <div class="feed-item-student">
+                    <span class="feed-avatar">${escapeHtml((item.name || "S").charAt(0).toUpperCase())}</span>
+                    <div>
+                        <strong class="feed-name">${escapeHtml(item.name)}</strong>
+                        <span class="feed-code">${escapeHtml(item.student_id)}${item.time ? ` · ${escapeHtml(item.time)}` : ""}</span>
+                    </div>
+                </div>
+                <span class="pill ${pillClass}">${escapeHtml(item.status)}</span>
+            </li>`;
+        }).join("");
+    }
+
+    function announceNewCheckins(newlyChecked) {
+        if (!Array.isArray(newlyChecked) || newlyChecked.length === 0) return;
+        const latest = newlyChecked[0];
+        playCheckinChime(latest.status);
+
+        const extraCount = newlyChecked.length > 1 ? ` (+${newlyChecked.length - 1} more)` : "";
+        const pillClass = latest.status === "Late" ? "pill-late" : "pill-present";
+        const bannerHtml = `
+            <span class="live-pop-icon">${latest.status === "Late" ? "⏱" : "✓"}</span>
+            <div class="live-pop-text">
+                <strong>${escapeHtml(latest.name)}</strong> <span class="code">(${escapeHtml(latest.student_id)})</span> checked in${escapeHtml(extraCount)}
+            </div>
+            <span class="pill ${pillClass}">${escapeHtml(latest.status)}</span>
+        `;
+
+        ["host-live-banner", "presentation-live-pop"].forEach((id) => {
+            const box = $(id);
+            if (!box) return;
+            box.innerHTML = bannerHtml;
+            box.classList.remove("hidden", "pop-late");
+            if (latest.status === "Late") box.classList.add("pop-late");
+        });
+
+        if (state.livePopTimer) clearTimeout(state.livePopTimer);
+        state.livePopTimer = setTimeout(() => {
+            $("host-live-banner")?.classList.add("hidden");
+            $("presentation-live-pop")?.classList.add("hidden");
+        }, 6500);
+    }
+
+    async function updateHostSessionLateCutoff(nextIso, toastMsg) {
+        if (!state.hostSession || !sb) return;
+        const prevIso = state.hostSession.late_after_at || null;
+        state.hostSession.late_after_at = nextIso;
+        saveHostSession(state.hostSession.token, nextIso);
+        updateSmartTimers();
+        try {
+            const { error } = await sb
+                .from("checkin_sessions")
+                .update({ late_after_at: nextIso })
+                .eq("token", state.hostSession.token);
+            if (error && !/late_after_at/i.test(String(error.message || ""))) throw error;
+            if (toastMsg) showToast(toastMsg);
+        } catch (err) {
+            console.error("Could not update late cutoff:", err);
+            state.hostSession.late_after_at = prevIso;
+            updateSmartTimers();
+            showToast("Could not update Late timer", "error");
+        }
+    }
+
+    async function handleLateToggle() {
+        if (!state.hostSession) return;
+        const now = Date.now();
+        const lateAt = state.hostSession.late_after_at ? new Date(state.hostSession.late_after_at).getTime() : null;
+        const isCurrentlyLate = lateAt !== null && lateAt <= now;
+        if (isCurrentlyLate) {
+            const reopenedIso = new Date(now + 5 * 60 * 1000).toISOString();
+            await updateHostSessionLateCutoff(reopenedIso, "On-Time window reopened for 5 minutes");
+        } else {
+            const immediateLateIso = new Date(now - 1000).toISOString();
+            await updateHostSessionLateCutoff(immediateLateIso, "Late Mode active — new check-ins will be marked Late");
+        }
+    }
+
+    async function extendLateGrace(minutes = 5) {
+        if (!state.hostSession) return;
+        const now = Date.now();
+        const currentLateMs = state.hostSession.late_after_at ? new Date(state.hostSession.late_after_at).getTime() : now;
+        const baseMs = Math.max(now, currentLateMs);
+        const nextIso = new Date(baseMs + minutes * 60 * 1000).toISOString();
+        await updateHostSessionLateCutoff(nextIso, `Added +${minutes}m to On-Time grace period`);
     }
 
     async function loadRoster(silent = false) {
@@ -1031,16 +1347,84 @@
             }
 
             let checked = 0;
+            let presentCount = 0;
+            let lateCount = 0;
             const items = list.map((student) => {
                 const status = statuses[student.student_id];
-                if (status === "Present" || status === "Late") checked += 1;
+                if (status === "Present") {
+                    checked += 1;
+                    presentCount += 1;
+                } else if (status === "Late") {
+                    checked += 1;
+                    lateCount += 1;
+                }
                 return { ...student, status };
             });
 
+            const pendingCount = Math.max(list.length - checked, 0);
+            const pct = list.length > 0 ? Math.round((checked / list.length) * 100) : 0;
+
             $("host-checked").textContent = String(checked);
             $("host-total").textContent = String(list.length);
-            $("host-pending").textContent = String(Math.max(list.length - checked, 0));
+            $("host-pending").textContent = String(pendingCount);
             $("presentation-checked").textContent = String(checked);
+            if ($("presentation-total-label")) {
+                $("presentation-total-label").textContent = `of ${list.length} checked in (${pct}%)`;
+            }
+            if ($("presentation-present-count")) $("presentation-present-count").textContent = String(presentCount);
+            if ($("presentation-late-count")) $("presentation-late-count").textContent = String(lateCount);
+            if ($("presentation-pending-count")) $("presentation-pending-count").textContent = String(pendingCount);
+            if ($("presentation-progress-fill")) $("presentation-progress-fill").style.width = `${pct}%`;
+
+            // Detect newly checked-in students for live projector feed + sound
+            const isFirstSeed = state.rosterSeededForToken !== session.token;
+            const newlyChecked = [];
+            const timeLabel = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+            if (isFirstSeed) {
+                state.knownCheckins.clear();
+                state.liveFeed = [];
+                items.forEach((item) => {
+                    if (item.status === "Present" || item.status === "Late") {
+                        state.knownCheckins.set(item.student_id, item.status);
+                        state.liveFeed.push({
+                            name: item.name,
+                            student_id: item.student_id,
+                            status: item.status,
+                            time: "",
+                            isNew: false
+                        });
+                    }
+                });
+                state.rosterSeededForToken = session.token;
+            } else {
+                state.liveFeed.forEach((f) => { f.isNew = false; });
+                items.forEach((item) => {
+                    if (item.status === "Present" || item.status === "Late") {
+                        const prevStatus = state.knownCheckins.get(item.student_id);
+                        if (prevStatus !== item.status) {
+                            state.knownCheckins.set(item.student_id, item.status);
+                            const entry = {
+                                name: item.name,
+                                student_id: item.student_id,
+                                status: item.status,
+                                time: timeLabel,
+                                isNew: true
+                            };
+                            newlyChecked.push(entry);
+                            state.liveFeed = [
+                                entry,
+                                ...state.liveFeed.filter((f) => f.student_id !== item.student_id)
+                            ].slice(0, FEED_LIMIT);
+                        }
+                    }
+                });
+            }
+
+            renderProjectorFeed();
+            if (newlyChecked.length > 0) {
+                announceNewCheckins(newlyChecked);
+            }
 
             const roster = $("host-roster");
             if (items.length === 0) {
@@ -1059,7 +1443,7 @@
                 }).join("");
             }
 
-            $("host-roster-updated").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+            $("host-roster-updated").textContent = `Updated ${timeLabel}`;
         } catch (err) {
             console.error("Could not load roster:", err);
             if (!silent) showToast("Could not refresh the roster", "error");
@@ -1095,9 +1479,14 @@
 
     function newSession() {
         state.hostSession = null;
+        state.rosterSeededForToken = "";
+        state.knownCheckins.clear();
+        state.liveFeed = [];
         clearSavedHostSession();
         if (state.rosterTimer) clearInterval(state.rosterTimer);
         state.rosterTimer = null;
+        if (state.countdownTimer) clearInterval(state.countdownTimer);
+        state.countdownTimer = null;
         closePresentation();
         stopScanner();
         $("host-session").classList.add("hidden");
@@ -1105,6 +1494,8 @@
         $("session-qr").innerHTML = "";
         $("presentation-qr").innerHTML = "";
         $("session-link").value = "";
+        $("host-live-banner")?.classList.add("hidden");
+        $("presentation-live-pop")?.classList.add("hidden");
     }
 
     // Fullscreen QR for the classroom projector.
@@ -1113,6 +1504,8 @@
         if (!overlay) return;
         overlay.classList.remove("hidden");
         document.body.style.overflow = "hidden";
+        updateSmartTimers();
+        renderProjectorFeed();
         const exit = $("presentation-exit");
         if (exit) exit.focus();
     }
@@ -1161,8 +1554,14 @@
         }
     }
 
-    function saveHostSession(token) {
-        try { localStorage.setItem(HOST_STORAGE_KEY, JSON.stringify({ token, savedAt: Date.now() })); } catch (err) { /* ignore */ }
+    function saveHostSession(token, lateAfterAt = null) {
+        try {
+            localStorage.setItem(HOST_STORAGE_KEY, JSON.stringify({
+                token,
+                late_after_at: lateAfterAt || null,
+                savedAt: Date.now()
+            }));
+        } catch (err) { /* ignore */ }
     }
     function readSavedHostSession() {
         try {
@@ -1170,6 +1569,14 @@
             return raw && raw.token ? raw.token : "";
         } catch (err) {
             return "";
+        }
+    }
+    function readSavedHostLateAfter() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(HOST_STORAGE_KEY) || "null");
+            return raw && raw.late_after_at ? raw.late_after_at : null;
+        } catch (err) {
+            return null;
         }
     }
     function clearSavedHostSession() {
@@ -1219,6 +1626,11 @@
         $("present-btn").addEventListener("click", openPresentation);
         $("presentation-exit").addEventListener("click", closePresentation);
         $("signOutBtn").addEventListener("click", signOut);
+        $("host-late-toggle-btn")?.addEventListener("click", handleLateToggle);
+        $("presentation-late-toggle-btn")?.addEventListener("click", handleLateToggle);
+        $("host-extend-late-btn")?.addEventListener("click", () => extendLateGrace(5));
+        $("host-sound-btn")?.addEventListener("click", toggleProjectorSound);
+        $("presentation-sound-btn")?.addEventListener("click", toggleProjectorSound);
 
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") closePresentation();

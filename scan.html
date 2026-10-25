@@ -65,6 +65,7 @@
                     <span class="progress-label" id="session-count">0 / 0 checked in</span>
                 </div>
             </div>
+            <div id="student-late-banner" class="smart-timer-banner hidden" role="status" aria-live="polite"></div>
             <p class="hint hint-center" id="session-hint">Scan your QR code or type your Student ID below.</p>
             <p class="device-rule">One phone = one check-in</p>
 
@@ -192,6 +193,17 @@
                             <option value="120">2 hours</option>
                         </select>
                     </div>
+                    <div class="field">
+                        <label for="host-late-after">Auto-Late cutoff timer</label>
+                        <select id="host-late-after">
+                            <option value="15" selected>Mark Late after 15 minutes</option>
+                            <option value="5">Mark Late after 5 minutes</option>
+                            <option value="10">Mark Late after 10 minutes</option>
+                            <option value="20">Mark Late after 20 minutes</option>
+                            <option value="30">Mark Late after 30 minutes</option>
+                            <option value="0">Off — mark Present for entire session</option>
+                        </select>
+                    </div>
                     <button type="submit" class="btn btn-primary btn-block btn-lg" id="start-session-btn">Create check-in QR</button>
                 </form>
                 <p class="hint" id="host-form-hint"></p>
@@ -209,6 +221,20 @@
                         </div>
                         <span class="badge" id="host-session-badge">Open</span>
                     </div>
+
+                    <div class="smart-projector-bar" id="host-smart-bar">
+                        <div class="smart-timer-group">
+                            <span class="smart-timer-pill" id="host-timer-pill">On-Time Window</span>
+                            <span class="smart-expiry-pill muted small" id="host-expiry-pill"></span>
+                        </div>
+                        <div class="smart-control-group">
+                            <button type="button" class="btn btn-ghost btn-sm" id="host-late-toggle-btn">Mark Late Now</button>
+                            <button type="button" class="btn btn-ghost btn-sm" id="host-extend-late-btn">+5m Grace</button>
+                            <button type="button" class="btn btn-ghost btn-sm" id="host-sound-btn" aria-pressed="true">Sound: On</button>
+                        </div>
+                    </div>
+
+                    <div id="host-live-banner" class="live-checkin-banner hidden" role="status" aria-live="polite"></div>
 
                     <div class="qr-box">
                         <div id="session-qr" class="qr-canvas" aria-label="Check-in QR code"></div>
@@ -255,12 +281,45 @@
         <!-- Presentation overlay: project the QR for the class -->
         <div id="presentation" class="presentation hidden" role="dialog" aria-modal="true" aria-label="Projected check-in code">
             <div class="presentation-inner">
+                <div class="presentation-top-strip">
+                    <span class="smart-timer-pill" id="presentation-timer-pill">On-Time Window</span>
+                    <span class="smart-expiry-pill" id="presentation-expiry-pill"></span>
+                </div>
                 <p class="presentation-eyebrow">Scan to mark yourself present</p>
                 <h2 id="presentation-title">Section</h2>
                 <p class="muted" id="presentation-sub">—</p>
-                <div id="presentation-qr" class="qr-canvas presentation-qr" aria-label="Check-in QR code"></div>
-                <p class="presentation-count"><strong id="presentation-checked">0</strong> checked in</p>
+
+                <div class="presentation-stage">
+                    <div class="presentation-qr-col">
+                        <div id="presentation-qr" class="qr-canvas presentation-qr" aria-label="Check-in QR code"></div>
+                        <p class="presentation-count"><strong id="presentation-checked">0</strong> <span id="presentation-total-label">checked in</span></p>
+                        <div class="presentation-progress-track" aria-hidden="true">
+                            <div class="presentation-progress-fill" id="presentation-progress-fill"></div>
+                        </div>
+                        <div class="presentation-stat-pills">
+                            <span class="pill pill-present"><strong id="presentation-present-count">0</strong> Present</span>
+                            <span class="pill pill-late"><strong id="presentation-late-count">0</strong> Late</span>
+                            <span class="pill"><strong id="presentation-pending-count">0</strong> Pending</span>
+                        </div>
+                    </div>
+
+                    <div class="presentation-feed-col" id="presentation-feed-panel">
+                        <div class="presentation-live-pop hidden" id="presentation-live-pop" role="status" aria-live="polite"></div>
+                        <div class="presentation-feed-box">
+                            <div class="presentation-feed-head">
+                                <span>Live Check-In Feed</span>
+                                <span class="presentation-live-dot">● LIVE</span>
+                            </div>
+                            <ul class="presentation-feed-list" id="presentation-feed-list">
+                                <li class="presentation-feed-empty">Waiting for students to scan…</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="presentation-actions">
+                    <button type="button" class="btn btn-secondary" id="presentation-sound-btn" aria-pressed="true">Sound: On</button>
+                    <button type="button" class="btn btn-secondary" id="presentation-late-toggle-btn">Mark Late Now</button>
                     <button type="button" class="btn btn-primary" id="presentation-copy">Copy link</button>
                     <button type="button" class="btn btn-secondary" id="presentation-exit">Exit</button>
                 </div>
