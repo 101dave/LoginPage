@@ -80,7 +80,7 @@ test("every locally referenced asset exists", () => {
 
 test("service worker caches the new shell and the QR page offline", () => {
     const sw = read("sw.js");
-    assert.match(sw, /scholog-shell-v10/);
+    assert.match(sw, /scholog-shell-v11/);
     for (const asset of [
         "./scan.html", "./scan.css", "./scan.js", "./pdf.js",
         "./vendor/supabase.js", "./vendor/qrcode.js", "./vendor/html5-qrcode.min.js",
@@ -139,9 +139,11 @@ test("attendance writes target the real composite unique key", () => {
     assert.match(source, /subject: "General"/);
 });
 
-test("grading migration preserves scores and matches category-id writes", () => {
+test("grading migration preserves scores and scopes categories per section", () => {
     const sql = read("supabase/migrations/20261025_grading_categories.sql");
+    const perSecSql = read("supabase/migrations/20261025_per_section_grading_categories.sql");
     const main = read("main.js");
+    const html = read("main.html");
     assert.match(sql, /create table if not exists public\.grading_categories/);
     assert.match(sql, /create table if not exists public\.section_grading_categories/);
     for (const column of ["category_id", "category_name", "category_weight", "grading_period"]) {
@@ -152,7 +154,16 @@ test("grading migration preserves scores and matches category-id writes", () => 
     assert.match(sql, /drop function if exists public\.upsert_score/);
     assert.match(sql, /udt_name <> 'uuid'/);
     assert.match(sql, /notify pgrst, 'reload schema'/);
+
+    assert.match(perSecSql, /add column if not exists section text/);
+    assert.match(perSecSql, /add column if not exists archived boolean not null default false/);
+    assert.match(perSecSql, /drop constraint if exists grading_categories_user_id_name_key/);
+    assert.match(perSecSql, /on public\.grading_categories \(user_id, section, name\)\s+where \(not archived\)/);
+    assert.match(perSecSql, /notify pgrst, 'reload schema'/);
+
     assert.match(main, /onConflict: "user_id,date,student_id,grading_period,category_id"/);
+    assert.doesNotMatch(html, /grading-global-total/);
+    assert.doesNotMatch(main, /score-column-letter/);
 });
 
 test("deployment hardening: Vercel headers, robots and sitemap are in place", () => {

@@ -150,29 +150,54 @@ function newCategoryId() {
     });
 }
 
-function sanitizeGradeCategories(value) {
+function sanitizeGradeCategories(value, legacySectionMap = null, fallbackSection = "") {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
-    return value.reduce((clean, category) => {
-        const id = String(category?.id || "");
+    const clean = [];
+    value.forEach(category => {
+        if (category?.archived === true) return;
+        const rawId = String(category?.id || "").trim();
         const name = String(category?.name || "").trim();
         const weight = Number(category?.weight);
-        const nameKey = name.toLowerCase();
-        if (!id || !name || name.length > 60 || seen.has(nameKey)) return clean;
-        if (!Number.isFinite(weight) || weight < 0 || weight > 100) return clean;
-        seen.add(nameKey);
-        clean.push({ id, name, weight });
-        return clean;
-    }, []);
+        if (!rawId || !name || name.length > 60) return;
+        if (!Number.isFinite(weight) || weight < 0 || weight > 100) return;
+
+        const explicitSection = String(category?.section || "").trim();
+        let targetSections = [];
+        if (explicitSection) {
+            targetSections = [explicitSection];
+        } else if (legacySectionMap && typeof legacySectionMap === "object" && !Array.isArray(legacySectionMap)) {
+            targetSections = Object.keys(legacySectionMap).filter(
+                sec => Array.isArray(legacySectionMap[sec]) && legacySectionMap[sec].map(String).includes(rawId)
+            );
+            if (targetSections.length === 0 && Object.keys(legacySectionMap).length === 0 && fallbackSection) {
+                targetSections = [fallbackSection];
+            }
+        } else if (fallbackSection) {
+            targetSections = [fallbackSection];
+        }
+
+        targetSections.forEach((sec, index) => {
+            const section = String(sec || "").trim();
+            if (!section) return;
+            const id = index === 0 ? rawId : newCategoryId();
+            const key = `${section.toLowerCase()}\n${name.toLowerCase()}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            clean.push({ id, section, name, weight, _sourceId: index > 0 ? rawId : null });
+        });
+    });
+    return clean;
 }
 
-function sanitizeSectionGradeCategories(value, categories = []) {
-    const validIds = new Set(categories.map(category => category.id));
+function sanitizeSectionGradeCategories(_value, categories = []) {
     const output = {};
-    if (!value || typeof value !== "object" || Array.isArray(value)) return output;
-    Object.keys(value).forEach(section => {
-        if (!Array.isArray(value[section])) return;
-        output[section] = [...new Set(value[section].map(String).filter(id => validIds.has(id)))];
+    categories.forEach(category => {
+        if (!category?.section || !category?.id) return;
+        if (!output[category.section]) output[category.section] = [];
+        if (!output[category.section].includes(category.id)) {
+            output[category.section].push(category.id);
+        }
     });
     return output;
 }
@@ -231,6 +256,19 @@ function normalizeState(raw) {
         }
     });
 
+    const rawCategories = sanitizeGradeCategories(raw.gradeCategories, raw.sectionGradeCategories, sections[0] || "");
+    const clonedIdBySourceAndSection = new Map();
+    const gradeCategories = rawCategories.map(cat => {
+        if (cat._sourceId) {
+            clonedIdBySourceAndSection.set(`${cat._sourceId}::${cat.section}`, cat.id);
+        }
+        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight };
+    });
+    gradeCategories.forEach(cat => {
+        if (cat.section && !sections.includes(cat.section)) sections.push(cat.section);
+    });
+    const studentSectionByCode = new Map(students.map(s => [s.student_id, s.section]));
+
     const scores = {};
     const rawSc = (raw.scores && typeof raw.scores === "object" && !Array.isArray(raw.scores))
         ? raw.scores
@@ -242,22 +280,24 @@ function normalizeState(raw) {
         const legacy = parseLegacyScoreSubject(value.subject || parsed.subject);
         const gradingPeriod = value.grading_period || legacy.period;
         const categoryName = value.category_name || legacy.category;
-        const categoryId = value.category_id || null;
         const studentId = value.student_id || parsed.studentId;
-        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, categoryId, categoryName);
+        const studSection = studentSectionByCode.get(studentId) || "";
+        const remappedId = (value.category_id && studSection && clonedIdBySourceAndSection.get(`${value.category_id}::${studSection}`))
+            || value.category_id
+            || null;
+        const normalizedKey = makeScoreRecordKey(parsed.date, studentId, gradingPeriod, remappedId, categoryName);
         scores[normalizedKey] = {
             ...value,
             date: parsed.date,
             student_id: studentId,
             subject: value.subject || gradingPeriod,
             grading_period: gradingPeriod,
-            category_id: categoryId,
+            category_id: remappedId,
             category_name: categoryName,
             category_weight: Number(value.category_weight ?? 100)
         };
     });
 
-    const gradeCategories = sanitizeGradeCategories(raw.gradeCategories);
     const sectionGradeCategories = sanitizeSectionGradeCategories(raw.sectionGradeCategories, gradeCategories);
     return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories };
 }
@@ -434,23 +474,35 @@ async function fetchCloudState() {
         attendance[`${row.date}_${row.student_id}`] = row.status;
     });
 
-    const gradeCategories = sanitizeGradeCategories(categoryData);
-    const sectionGradeCategories = sanitizeSectionGradeCategories(
-        sectionCategoryData.reduce((map, row) => {
-            if (!map[row.section]) map[row.section] = [];
-            map[row.section].push(row.category_id);
-            return map;
-        }, {}),
-        gradeCategories
-    );
+    const legacySectionMap = sectionCategoryData.reduce((map, row) => {
+        if (!row?.section || !row?.category_id) return map;
+        if (!map[row.section]) map[row.section] = [];
+        map[row.section].push(row.category_id);
+        return map;
+    }, {});
+    const rawCategories = sanitizeGradeCategories(categoryData, legacySectionMap, sections[0] || "");
+    const clonedIdBySourceAndSection = new Map();
+    const gradeCategories = rawCategories.map(cat => {
+        if (cat._sourceId) {
+            clonedIdBySourceAndSection.set(`${cat._sourceId}::${cat.section}`, cat.id);
+        }
+        return { id: cat.id, section: cat.section, name: cat.name, weight: cat.weight };
+    });
+    const sectionGradeCategories = sanitizeSectionGradeCategories(legacySectionMap, gradeCategories);
+    const studentSectionByCode = new Map(students.map(s => [s.student_id, s.section]));
 
     const scores = {};
     scData.forEach(row => {
         const legacy = parseLegacyScoreSubject(row.subject);
         const gradingPeriod = row.grading_period || legacy.period;
         const categoryName = row.category_name || legacy.category;
-        const category = gradeCategories.find(item => item.name === categoryName);
-        const categoryId = row.category_id || category?.id || null;
+        const studSection = studentSectionByCode.get(row.student_id) || "";
+        const remappedId = (row.category_id && studSection && clonedIdBySourceAndSection.get(`${row.category_id}::${studSection}`))
+            || row.category_id
+            || null;
+        const category = gradeCategories.find(item => item.id === remappedId)
+            || gradeCategories.find(item => (!studSection || item.section === studSection) && item.name === categoryName);
+        const categoryId = remappedId || category?.id || null;
         const categoryWeight = Number(row.category_weight ?? category?.weight ?? 100);
         const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName);
         scores[key] = {
@@ -468,6 +520,9 @@ async function fetchCloudState() {
 
     students.forEach(s => {
         if (s.section && !sections.includes(s.section)) sections.push(s.section);
+    });
+    gradeCategories.forEach(cat => {
+        if (cat.section && !sections.includes(cat.section)) sections.push(cat.section);
     });
 
     return { sections, students, attendance, scores, gradeCategories, sectionGradeCategories };
@@ -512,14 +567,24 @@ function applyScoreOpToLocalState(row) {
     const categoryName = row.category_name || legacy.category;
     const categoryId = row.category_id || null;
     const categoryWeight = Number(row.category_weight ?? 100);
-    if (categoryId && categoryName && !state.gradeCategories.some(item => item.id === categoryId)) {
-        const sameName = state.gradeCategories.find(item => item.name.toLowerCase() === String(categoryName).toLowerCase());
+    const studSection = String(
+        row.section
+        || state.students.find(s => s.student_id === row.student_id)?.section
+        || state.sections[0]
+        || ""
+    ).trim();
+    if (categoryId && categoryName && studSection && !state.gradeCategories.some(item => item.id === categoryId)) {
+        const sameName = state.gradeCategories.find(
+            item => item.section === studSection && item.name.toLowerCase() === String(categoryName).toLowerCase()
+        );
         if (!sameName) {
             state.gradeCategories.push({
                 id: String(categoryId),
+                section: studSection,
                 name: String(categoryName).trim(),
                 weight: Number.isFinite(categoryWeight) ? Math.min(Math.max(categoryWeight, 0), 100) : 0
             });
+            state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
         }
     }
     const key = makeScoreRecordKey(row.date, row.student_id, gradingPeriod, categoryId, categoryName);
@@ -556,11 +621,14 @@ function applyPendingOpsToLocalState(ops) {
                 });
                 break;
             case "gradingConfig":
-                if (Array.isArray(op.categories)) {
-                    state.gradeCategories = sanitizeGradeCategories(op.categories);
-                    if (op.section) {
-                        state.sectionGradeCategories[op.section] = [...new Set((op.selectedIds || []).map(String))];
-                    }
+                if (Array.isArray(op.categories) && op.section) {
+                    const sectionCategories = sanitizeGradeCategories(op.categories, null, op.section)
+                        .map(cat => ({ id: cat.id, section: op.section, name: cat.name, weight: cat.weight }));
+                    state.gradeCategories = [
+                        ...state.gradeCategories.filter(cat => cat.section !== op.section),
+                        ...sectionCategories
+                    ];
+                    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
                     refreshScoreCategoryMetadata(state.gradeCategories);
                 }
                 break;
@@ -572,6 +640,23 @@ function applyPendingOpsToLocalState(ops) {
                 break;
             case "sec+":
                 if (op.name && !state.sections.includes(op.name)) state.sections.push(op.name);
+                break;
+            case "sec^":
+                if (op.old_name && op.new_name) {
+                    const idx = state.sections.indexOf(op.old_name);
+                    if (idx !== -1) state.sections[idx] = op.new_name;
+                    state.students.forEach(s => { if (s.section === op.old_name) s.section = op.new_name; });
+                    state.gradeCategories.forEach(c => { if (c.section === op.old_name) c.section = op.new_name; });
+                    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
+                }
+                break;
+            case "sec-":
+                if (op.name) {
+                    state.sections = state.sections.filter(s => s !== op.name);
+                    state.students = state.students.filter(s => s.section !== op.name);
+                    state.gradeCategories = state.gradeCategories.filter(c => c.section !== op.name);
+                    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
+                }
                 break;
             case "stu+":
                 if (op.student_id && op.name) {
@@ -662,12 +747,22 @@ async function trySync(...ops) {
     return allApplied;
 }
 
+function resolveSectionForScoreRow(row) {
+    if (row?.section) return String(row.section).trim();
+    const stud = state.students.find(s => s.student_id === row?.student_id);
+    if (stud?.section) return stud.section;
+    const cat = state.gradeCategories.find(c => c.id === row?.category_id);
+    if (cat?.section) return cat.section;
+    return state.sections[0] || "General";
+}
+
 function scoreRowForCloud(row, uid) {
     const legacy = parseLegacyScoreSubject(row.subject);
     const gradingPeriod = row.grading_period || legacy.period;
     const categoryName = row.category_name || legacy.category;
+    const studSection = resolveSectionForScoreRow(row);
     const category = state.gradeCategories.find(item => item.id === row.category_id)
-        || state.gradeCategories.find(item => item.name === categoryName);
+        || state.gradeCategories.find(item => item.section === studSection && item.name === categoryName);
     const categoryId = category?.id || row.category_id;
     if (!categoryId) throw new Error(`Set up the ${categoryName} grading category before syncing this score.`);
     return {
@@ -690,23 +785,22 @@ function isMissingCategoryFkError(error) {
     return code === "23503" || /scores_category_id_fkey|grading_categories/i.test(msg);
 }
 
-// Reconcile a client-created category UUID with an existing cloud category of
-// the same name (for example, a migration-backfilled "General" category) so
-// unique(user_id, name) never blocks offline replay and historical scores
-// re-link cleanly to the client category ID.
-async function reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp) {
+// Reconcile a client-created category UUID with an existing active cloud
+// category of the same name within the same section so unique(user_id, section, name)
+// never blocks offline replay and historical scores re-link cleanly.
+async function reconcileCategoryByNameInCloud(uid, section, existingSectionCategories, category, timestamp) {
     const targetNameKey = String(category.name || "").trim().toLowerCase();
     const migratingPrefix = `__migrating_${category.id}_`;
-    const clashIndex = existingCategories.findIndex(
-        row => row.id !== category.id && (
+    const clashIndex = existingSectionCategories.findIndex(
+        row => row.id !== category.id && !row.archived && (
             String(row.name || "").trim().toLowerCase() === targetNameKey
             || String(row.name || "").startsWith(migratingPrefix)
         )
     );
     if (clashIndex === -1) return;
 
-    const clash = existingCategories[clashIndex];
-    const targetExists = existingCategories.some(row => row.id === category.id);
+    const clash = existingSectionCategories[clashIndex];
+    const targetExists = existingSectionCategories.some(row => row.id === category.id);
 
     must(await supabaseClient.from("grading_categories")
         .update({ name: `${migratingPrefix}${clash.id}`, updated_at: timestamp })
@@ -716,8 +810,10 @@ async function reconcileCategoryByNameInCloud(uid, existingCategories, category,
     must(await supabaseClient.from("grading_categories").upsert({
         id: category.id,
         user_id: uid,
+        section,
         name: category.name,
         weight: category.weight,
+        archived: false,
         updated_at: timestamp
     }, { onConflict: "id" }));
 
@@ -751,43 +847,34 @@ async function reconcileCategoryByNameInCloud(uid, existingCategories, category,
         category_weight: category.weight
     }).eq("user_id", uid).eq("category_id", clash.id));
 
-    const { data: clashSecRows, error: secErr } = await supabaseClient
-        .from("section_grading_categories")
-        .select("section")
-        .eq("user_id", uid)
-        .eq("category_id", clash.id);
-    if (secErr) throw secErr;
     must(await supabaseClient.from("section_grading_categories")
         .delete()
         .eq("user_id", uid)
         .eq("category_id", clash.id));
-    if (clashSecRows && clashSecRows.length > 0) {
-        const uniqueSections = [...new Set(clashSecRows.map(r => r.section).filter(Boolean))];
-        if (uniqueSections.length > 0) {
-            must(await supabaseClient.from("section_grading_categories").upsert(
-                uniqueSections.map(section => ({ user_id: uid, section, category_id: category.id })),
-                { onConflict: "user_id,section,category_id" }
-            ));
-        }
-    }
+    must(await supabaseClient.from("section_grading_categories").upsert(
+        [{ user_id: uid, section, category_id: category.id }],
+        { onConflict: "user_id,section,category_id" }
+    ));
 
     must(await supabaseClient.from("grading_categories")
         .delete()
         .eq("user_id", uid)
         .eq("id", clash.id));
 
-    existingCategories.splice(clashIndex, 1);
+    existingSectionCategories.splice(clashIndex, 1);
     if (!targetExists) {
-        existingCategories.push({
+        existingSectionCategories.push({
             id: category.id,
             user_id: uid,
+            section,
             name: category.name,
-            weight: category.weight
+            weight: category.weight,
+            archived: false
         });
     }
 }
 
-async function upsertScorePayloadWithCategoryRecovery(payload, uid) {
+async function upsertScorePayloadWithCategoryRecovery(payload, uid, sectionHint = "") {
     const conflictOpts = { onConflict: "user_id,date,student_id,grading_period,category_id" };
     const firstAttempt = await supabaseClient.from("scores").upsert(payload, conflictOpts);
     if (!firstAttempt || !firstAttempt.error) return firstAttempt;
@@ -798,52 +885,61 @@ async function upsertScorePayloadWithCategoryRecovery(payload, uid) {
     rows.forEach(row => {
         if (!row.category_id || neededMap.has(row.category_id)) return;
         const weight = Number(row.category_weight ?? 0);
+        const section = sectionHint || resolveSectionForScoreRow(row);
         neededMap.set(row.category_id, {
             id: row.category_id,
+            section,
             name: String(row.category_name || "General").trim() || "General",
             weight: Number.isFinite(weight) ? Math.min(Math.max(weight, 0), 100) : 0
         });
     });
 
     const timestamp = new Date().toISOString();
-    const existingCategories = await fetchAll("grading_categories", uid);
-
-    // If the account only had an auto-backfilled "General" (100%) category and
-    // offline score rows are restoring distinct categories, zero out the
-    // backfilled placeholder weight so global weights do not jump above 100%.
-    const hasNonGeneralRecovery = [...neededMap.values()].some(
-        c => c.name.toLowerCase() !== "general" && c.weight > 0
-    );
-    if (
-        hasNonGeneralRecovery
-        && existingCategories.length === 1
-        && String(existingCategories[0].name || "").trim().toLowerCase() === "general"
-        && Number(existingCategories[0].weight) === 100
-        && !neededMap.has(existingCategories[0].id)
-    ) {
-        const backfilled = existingCategories[0];
-        must(await supabaseClient.from("section_grading_categories")
-            .delete()
-            .eq("user_id", uid)
-            .eq("category_id", backfilled.id));
-        must(await supabaseClient.from("grading_categories")
-            .update({ weight: 0, updated_at: timestamp })
-            .eq("user_id", uid)
-            .eq("id", backfilled.id));
-        backfilled.weight = 0;
-    }
+    const allExistingCategories = await fetchAll("grading_categories", uid);
 
     for (const category of neededMap.values()) {
-        await reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp);
-        if (!existingCategories.some(row => row.id === category.id)) {
+        const sectionExisting = allExistingCategories.filter(row => row.section === category.section);
+
+        // If this section only had an auto-backfilled "General" (100%) category
+        // and offline score rows are restoring distinct categories for this section,
+        // archive that placeholder so the section's weights stay clean.
+        if (
+            category.name.toLowerCase() !== "general"
+            && category.weight > 0
+            && sectionExisting.filter(r => !r.archived).length === 1
+            && String(sectionExisting.find(r => !r.archived).name || "").trim().toLowerCase() === "general"
+            && Number(sectionExisting.find(r => !r.archived).weight) === 100
+            && !neededMap.has(sectionExisting.find(r => !r.archived).id)
+        ) {
+            const backfilled = sectionExisting.find(r => !r.archived);
+            must(await supabaseClient.from("section_grading_categories")
+                .delete()
+                .eq("user_id", uid)
+                .eq("category_id", backfilled.id));
+            must(await supabaseClient.from("grading_categories")
+                .update({ archived: true, weight: 0, updated_at: timestamp })
+                .eq("user_id", uid)
+                .eq("id", backfilled.id));
+            backfilled.archived = true;
+            backfilled.weight = 0;
+        }
+
+        await reconcileCategoryByNameInCloud(uid, category.section, sectionExisting, category, timestamp);
+        if (!sectionExisting.some(row => row.id === category.id)) {
             must(await supabaseClient.from("grading_categories").upsert({
                 id: category.id,
                 user_id: uid,
+                section: category.section,
                 name: category.name,
                 weight: category.weight,
+                archived: false,
                 updated_at: timestamp
             }, { onConflict: "id" }));
-            existingCategories.push({ ...category, user_id: uid });
+            must(await supabaseClient.from("section_grading_categories").upsert(
+                [{ user_id: uid, section: category.section, category_id: category.id }],
+                { onConflict: "user_id,section,category_id" }
+            ));
+            allExistingCategories.push({ ...category, user_id: uid, archived: false });
         }
     }
 
@@ -851,11 +947,19 @@ async function upsertScorePayloadWithCategoryRecovery(payload, uid) {
 }
 
 async function syncGradingConfigToCloud(op, uid) {
+    const section = String(op.section || "").trim();
+    if (!section) return;
     const timestamp = new Date().toISOString();
-    const existingCategories = await fetchAll("grading_categories", uid);
+    const { data: existingRows, error: fetchErr } = await supabaseClient
+        .from("grading_categories")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("section", section);
+    if (fetchErr) throw fetchErr;
+    const existingCategories = existingRows || [];
 
     for (const category of op.categories) {
-        await reconcileCategoryByNameInCloud(uid, existingCategories, category, timestamp);
+        await reconcileCategoryByNameInCloud(uid, section, existingCategories, category, timestamp);
     }
 
     for (let i = 0; i < op.categories.length; i += 500) {
@@ -863,8 +967,10 @@ async function syncGradingConfigToCloud(op, uid) {
             op.categories.slice(i, i + 500).map(category => ({
                 id: category.id,
                 user_id: uid,
+                section,
                 name: category.name,
                 weight: category.weight,
+                archived: false,
                 updated_at: timestamp
             })),
             { onConflict: "id" }
@@ -877,17 +983,16 @@ async function syncGradingConfigToCloud(op, uid) {
         }).eq("user_id", uid).eq("category_id", category.id));
     }
     must(await supabaseClient.from("section_grading_categories").delete()
-        .eq("user_id", uid).eq("section", op.section));
-    if (op.selectedIds.length > 0) {
+        .eq("user_id", uid).eq("section", section));
+    if (op.categories.length > 0) {
         must(await supabaseClient.from("section_grading_categories").insert(
-            op.selectedIds.map(categoryId => ({ user_id: uid, section: op.section, category_id: categoryId }))
+            op.categories.map(category => ({ user_id: uid, section, category_id: category.id }))
         ));
     }
 
-    // Retire categories not present in the saved global list (such as an
-    // auto-backfilled "General" category after a teacher configures custom
-    // categories): drop unused ones and zero out weight on any still referenced
-    // by historical score rows so global totals stay at 100%.
+    // Retire categories removed from THIS section only: delete unused ones and
+    // archive any still referenced by historical score rows. Other sections are
+    // never touched.
     const activeIds = new Set(op.categories.map(category => category.id));
     for (const stale of existingCategories) {
         if (activeIds.has(stale.id)) continue;
@@ -907,9 +1012,9 @@ async function syncGradingConfigToCloud(op, uid) {
                 .delete()
                 .eq("user_id", uid)
                 .eq("id", stale.id));
-        } else if (Number(stale.weight) !== 0) {
+        } else if (!stale.archived || Number(stale.weight) !== 0) {
             must(await supabaseClient.from("grading_categories")
-                .update({ weight: 0, updated_at: timestamp })
+                .update({ archived: true, weight: 0, updated_at: timestamp })
                 .eq("user_id", uid)
                 .eq("id", stale.id));
         }
@@ -935,18 +1040,20 @@ async function applyCloudOp(op) {
             break;
         }
         case "scr": // one score with its category and grading-period metadata
-            await upsertScorePayloadWithCategoryRecovery(scoreRowForCloud(op, uid), uid);
+            await upsertScorePayloadWithCategoryRecovery(scoreRowForCloud(op, uid), uid, op.section || "");
             break;
         case "scrB": { // batch scores
             for (let i = 0; i < op.rows.length; i += 500) {
+                const slice = op.rows.slice(i, i + 500);
                 await upsertScorePayloadWithCategoryRecovery(
-                    op.rows.slice(i, i + 500).map(r => scoreRowForCloud(r, uid)),
-                    uid
+                    slice.map(r => scoreRowForCloud(r, uid)),
+                    uid,
+                    slice[0]?.section || op.section || ""
                 );
             }
             break;
         }
-        case "gradingConfig": // global categories + one section's selected category IDs
+        case "gradingConfig": // one section's independent categories and weights
             await syncGradingConfigToCloud(op, uid);
             break;
         case "att-": // remove one student's attendance history
@@ -964,26 +1071,44 @@ async function applyCloudOp(op) {
                 user_id: uid, name: op.name
             }, { onConflict: "user_id,name" }));
             break;
-        case "sec^": // rename section and update associated students
+        case "sec^": // rename section and update associated students + section categories
             must(await supabaseClient.from("sections").upsert({ user_id: uid, name: op.new_name }, { onConflict: "user_id,name" }));
             must(await supabaseClient.from("students").update({ section: op.new_name }).eq("user_id", uid).eq("section", op.old_name));
+            must(await supabaseClient.from("grading_categories").update({ section: op.new_name }).eq("user_id", uid).eq("section", op.old_name));
             must(await supabaseClient.from("section_grading_categories").update({ section: op.new_name }).eq("user_id", uid).eq("section", op.old_name));
             must(await supabaseClient.from("sections").delete().eq("user_id", uid).eq("name", op.old_name));
             break;
-        case "sec-": // delete section with its students and attendance
+        case "sec-": { // delete section with its students, attendance, scores, and categories
+            const { data: secCats, error: secCatErr } = await supabaseClient
+                .from("grading_categories")
+                .select("id")
+                .eq("user_id", uid)
+                .eq("section", op.name);
+            if (secCatErr) throw secCatErr;
+            const catIds = (secCats || []).map(r => r.id).filter(Boolean);
+            for (let i = 0; i < catIds.length; i += 100) {
+                must(await supabaseClient.from("scores").delete()
+                    .eq("user_id", uid).in("category_id", catIds.slice(i, i + 100)));
+            }
             if (op.codes && op.codes.length > 0) {
                 for (let i = 0; i < op.codes.length; i += 100) {
+                    const batch = op.codes.slice(i, i + 100);
                     must(await supabaseClient.from("attendance").delete()
-                        .eq("user_id", uid).in("student_id", op.codes.slice(i, i + 100)));
+                        .eq("user_id", uid).in("student_id", batch));
+                    must(await supabaseClient.from("scores").delete()
+                        .eq("user_id", uid).in("student_id", batch));
                 }
             }
-            must(await supabaseClient.from("students").delete()
-                .eq("user_id", uid).eq("section", op.name));
             must(await supabaseClient.from("section_grading_categories").delete()
+                .eq("user_id", uid).eq("section", op.name));
+            must(await supabaseClient.from("grading_categories").delete()
+                .eq("user_id", uid).eq("section", op.name));
+            must(await supabaseClient.from("students").delete()
                 .eq("user_id", uid).eq("section", op.name));
             must(await supabaseClient.from("sections").delete()
                 .eq("user_id", uid).eq("name", op.name));
             break;
+        }
         case "stu+": // add/edit student, keyed by student code (idempotent)
             must(await supabaseClient.from("students").upsert({
                 user_id: uid, student_id: op.student_id,
@@ -1109,16 +1234,33 @@ async function pushFullStateToCloud() {
     const categoryRows = state.gradeCategories.map(category => ({
         id: category.id,
         user_id: uid,
+        section: category.section,
         name: category.name,
-        weight: category.weight
+        weight: category.weight,
+        archived: false
     }));
+    const activeIds = new Set(categoryRows.map(row => row.id));
+    Object.values(state.scores).forEach(scoreRow => {
+        if (!scoreRow?.category_id || activeIds.has(scoreRow.category_id)) return;
+        activeIds.add(scoreRow.category_id);
+        categoryRows.push({
+            id: scoreRow.category_id,
+            user_id: uid,
+            section: resolveSectionForScoreRow(scoreRow),
+            name: String(scoreRow.category_name || "General").trim() || "General",
+            weight: 0,
+            archived: true
+        });
+    });
     for (let i = 0; i < categoryRows.length; i += 500) {
         must(await supabaseClient.from("grading_categories").insert(categoryRows.slice(i, i + 500)));
     }
 
-    const sectionCategoryRows = state.sections.flatMap(section =>
-        getSelectedGradeCategoryIds(section).map(categoryId => ({ user_id: uid, section, category_id: categoryId }))
-    );
+    const sectionCategoryRows = state.gradeCategories.map(category => ({
+        user_id: uid,
+        section: category.section,
+        category_id: category.id
+    }));
     for (let i = 0; i < sectionCategoryRows.length; i += 500) {
         must(await supabaseClient.from("section_grading_categories").insert(sectionCategoryRows.slice(i, i + 500)));
     }
@@ -1462,40 +1604,25 @@ function loadAttendanceSheet() {
 }
 
 // --- Student Scores View ---
-function getSelectedGradeCategoryIds(section) {
-    const allIds = state.gradeCategories.map(category => category.id);
-    if (!Object.prototype.hasOwnProperty.call(state.sectionGradeCategories, section)) return allIds;
-    const selected = new Set(state.sectionGradeCategories[section] || []);
-    return allIds.filter(id => selected.has(id));
-}
-
 function getSectionGradeCategories(section) {
-    const selected = new Set(getSelectedGradeCategoryIds(section));
-    return state.gradeCategories.filter(category => selected.has(category.id));
+    if (!section) return [];
+    return state.gradeCategories.filter(category => category.section === section);
 }
 
-function spreadsheetColumnName(index) {
-    let number = index + 1;
-    let name = "";
-    while (number > 0) {
-        number--;
-        name = String.fromCharCode(65 + (number % 26)) + name;
-        number = Math.floor(number / 26);
-    }
-    return name;
+function getSelectedGradeCategoryIds(section) {
+    return getSectionGradeCategories(section).map(category => category.id);
 }
 
 function renderScoreSheetHeader(categories, categoryMaximums) {
     const tableHead = document.getElementById("score-table-head");
     if (!tableHead) return;
     tableHead.innerHTML = `<tr>
-        <th class="score-grid-index"><span class="score-column-letter">A</span>#</th>
-        <th class="score-grid-student"><span class="score-column-letter">B</span>Student</th>
-        ${categories.map((category, index) => {
+        <th class="score-grid-index">#</th>
+        <th class="score-grid-student">Student</th>
+        ${categories.map((category) => {
             const maximum = categoryMaximums.get(category.id) || 100;
             return `<th class="score-grid-category" data-category-id="${esc(category.id)}">
                 <div class="score-category-heading">
-                    <span class="score-column-letter">${spreadsheetColumnName(index + 2)}</span>
                     <strong>${esc(category.name)}</strong>
                     <small>${esc(category.weight)}% weight</small>
                 </div>
@@ -1508,20 +1635,24 @@ function renderScoreSheetHeader(categories, categoryMaximums) {
                 </label>
             </th>`;
         }).join("")}
-        <th class="score-grid-final"><span class="score-column-letter">${spreadsheetColumnName(categories.length + 2)}</span>Final Grade</th>
+        <th class="score-grid-final">Final Grade</th>
     </tr>`;
 }
 
 function renderScoreWeightSummary(section) {
     const summary = document.getElementById("score-weight-summary");
     if (!summary) return;
-    const globalTotal = state.gradeCategories.reduce((sum, category) => sum + category.weight, 0);
+    if (!section) {
+        summary.textContent = "Create and select a section to configure its grading categories and weights.";
+        summary.classList.remove("text-rose");
+        return;
+    }
     const selected = getSectionGradeCategories(section);
-    const sectionTotal = selected.reduce((sum, category) => sum + category.weight, 0);
+    const sectionTotal = Number(selected.reduce((sum, category) => sum + category.weight, 0).toFixed(2));
     summary.textContent = selected.length > 0
-        ? `${selected.map(category => `${category.name} ${category.weight}%`).join(" · ")} | Section total: ${sectionTotal}% · Global total: ${globalTotal}%`
-        : "No categories selected. Open Categories & Weights to configure this section.";
-    summary.classList.toggle("text-rose", Math.abs(globalTotal - 100) > 0.001 || Math.abs(sectionTotal - 100) > 0.001);
+        ? `${section}: ${selected.map(category => `${category.name} ${category.weight}%`).join(" · ")} | Section total: ${sectionTotal}%`
+        : `No grading categories set up for ${section} yet. Click Categories & Weights to configure this section.`;
+    summary.classList.toggle("text-rose", selected.length > 0 && Math.abs(sectionTotal - 100) > 0.001);
 }
 
 function calculateStudentFinalGrade(studentId, section, gradingPeriod) {
@@ -1583,35 +1714,50 @@ function updateFinalGradeCells() {
 }
 
 function ensureScoreCategories() {
-    if (state.gradeCategories.length === 0) {
-        const names = [...new Set(Object.values(state.scores).map(value =>
-            value.category_name || parseLegacyScoreSubject(value.subject).category
-        ).filter(Boolean))].sort();
-        if (names.length > 0) {
-            const baseWeight = Math.floor((100 / names.length) * 100) / 100;
-            state.gradeCategories = names.map((name, index) => ({
+    const namesBySection = new Map();
+    Object.values(state.scores).forEach(value => {
+        if (value.category_id && state.gradeCategories.some(c => c.id === value.category_id)) return;
+        const section = resolveSectionForScoreRow(value);
+        if (state.gradeCategories.some(c => c.section === section)) return;
+        const name = String(value.category_name || parseLegacyScoreSubject(value.subject).category || "").trim();
+        if (!section || !name) return;
+        if (!namesBySection.has(section)) namesBySection.set(section, new Set());
+        namesBySection.get(section).add(name);
+    });
+
+    namesBySection.forEach((nameSet, section) => {
+        const names = [...nameSet].sort();
+        if (names.length === 0) return;
+        const baseWeight = Math.floor((100 / names.length) * 100) / 100;
+        names.forEach((name, index) => {
+            state.gradeCategories.push({
                 id: newCategoryId(),
+                section,
                 name,
                 weight: index === names.length - 1
                     ? Number((100 - baseWeight * (names.length - 1)).toFixed(2))
                     : baseWeight
-            }));
-        }
-    }
+            });
+        });
+    });
+
+    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
     refreshScoreCategoryMetadata(state.gradeCategories);
 }
 
 function refreshScoreCategoryMetadata(categories) {
+    const studentSectionByCode = new Map(state.students.map(s => [s.student_id, s.section]));
     const nextScores = {};
     Object.keys(state.scores).forEach(key => {
         const value = state.scores[key];
         const parsed = parseScoreKey(key);
         const studentId = value.student_id || parsed.studentId;
+        const studSection = studentSectionByCode.get(studentId) || "";
         const legacy = parseLegacyScoreSubject(value.subject || parsed.subject);
         const period = value.grading_period || legacy.period;
         const oldName = value.category_name || legacy.category;
         const category = categories.find(item => item.id === value.category_id)
-            || categories.find(item => !value.category_id && item.name === oldName);
+            || categories.find(item => !value.category_id && (!studSection || item.section === studSection) && item.name === oldName);
         const categoryId = category?.id || value.category_id || null;
         const categoryName = category?.name || oldName;
         const nextKey = makeScoreRecordKey(value.date || parsed.date, studentId, period, categoryId, categoryName);
@@ -1796,6 +1942,7 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
         if (cloudReady()) {
             const rows = savedRecords.map(record => ({
                 date,
+                section: category.section || sec,
                 student_id: record.studentId,
                 grading_period: gradingPeriod,
                 category_id: category.id,
@@ -1804,7 +1951,7 @@ async function updateScoreMaximum(categoryId, maxScoreValue, maxInput) {
                 score: Number(record.value.score),
                 max_score: maxScore
             }));
-            const synced = await trySync({ t: "scrB", rows });
+            const synced = await trySync({ t: "scrB", section: category.section || sec, rows });
             if (!synced) return false;
         }
     }
@@ -1852,6 +1999,7 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, score
         const synced = await trySync({
             t: "scr",
             date,
+            section: category.section,
             student_id: studentId,
             grading_period: gradingPeriod,
             category_id: category.id,
@@ -1867,37 +2015,47 @@ async function setStudentScore(date, studentId, gradingPeriod, categoryId, score
     return true;
 }
 
-function gradingCategoryRowMarkup(category, selected) {
+function gradingCategoryRowMarkup(category) {
     return `<div class="grading-weight-row" data-category-id="${esc(category.id)}">
-        <input type="checkbox" class="grading-category-use" aria-label="Use ${esc(category.name || "category")} in this section" ${selected ? "checked" : ""} onchange="updateGradingTotals()">
         <input type="text" class="form-control grading-category-name" value="${esc(category.name)}" maxlength="60" placeholder="e.g. Written Work" aria-label="Category name">
         <div class="grading-weight-input">
-            <input type="number" class="form-control grading-category-weight" min="0" max="100" step="0.01" value="${esc(category.weight)}" aria-label="Global weight for ${esc(category.name || "category")}" oninput="updateGradingTotals()">
+            <input type="number" class="form-control grading-category-weight" min="0" max="100" step="0.01" value="${esc(category.weight)}" aria-label="Weight for ${esc(category.name || "category")}" oninput="updateGradingTotals()">
             <span>%</span>
         </div>
+        <button type="button" class="grading-category-remove" onclick="removeGradingCategoryRow(this)" title="Remove category" aria-label="Remove ${esc(category.name || "category")}">&times;</button>
     </div>`;
 }
 
+function removeGradingCategoryRow(button) {
+    const rowsContainer = document.getElementById("grading-weight-rows");
+    const row = button?.closest(".grading-weight-row");
+    if (!rowsContainer || !row) return;
+    const allRows = rowsContainer.querySelectorAll(".grading-weight-row");
+    if (allRows.length <= 1) {
+        row.dataset.categoryId = newCategoryId();
+        row.querySelector(".grading-category-name").value = "";
+        row.querySelector(".grading-category-weight").value = "100";
+    } else {
+        row.remove();
+    }
+    setGradingSetupError();
+    updateGradingTotals();
+}
+
 function updateGradingTotals() {
-    let globalTotal = 0;
+    const section = document.getElementById("score-section")?.value || "Section";
     let sectionTotal = 0;
     document.querySelectorAll("#grading-weight-rows .grading-weight-row").forEach(row => {
         const weight = Number(row.querySelector(".grading-category-weight").value);
         if (!Number.isFinite(weight)) return;
-        globalTotal += weight;
-        if (row.querySelector(".grading-category-use").checked) sectionTotal += weight;
+        sectionTotal += weight;
     });
-    const globalElement = document.getElementById("grading-global-total");
     const sectionElement = document.getElementById("grading-section-total");
-    if (globalElement) {
-        globalElement.textContent = `All categories: ${Number(globalTotal.toFixed(2))}%`;
-        globalElement.classList.toggle("invalid", Math.abs(globalTotal - 100) > 0.001);
-    }
     if (sectionElement) {
-        sectionElement.textContent = `This section: ${Number(sectionTotal.toFixed(2))}%`;
+        sectionElement.textContent = `${section} total: ${Number(sectionTotal.toFixed(2))}%`;
         sectionElement.classList.toggle("invalid", Math.abs(sectionTotal - 100) > 0.001);
     }
-    return { globalTotal, sectionTotal };
+    return { sectionTotal };
 }
 
 function setGradingSetupError(message = "") {
@@ -1913,22 +2071,22 @@ function openGradingSetup() {
         showToast("Create and select a section first.", "error");
         return;
     }
-    document.getElementById("grading-setup-section").textContent = `Editing ${section} · category weights apply to every section`;
-    const selected = new Set(getSelectedGradeCategoryIds(section));
+    document.getElementById("grading-setup-section").textContent = `Section: ${section} · applies only to this section`;
+    const sectionCategories = getSectionGradeCategories(section);
     const rows = document.getElementById("grading-weight-rows");
-    rows.innerHTML = state.gradeCategories.map(category => gradingCategoryRowMarkup(category, selected.has(category.id))).join("");
-    if (state.gradeCategories.length === 0) {
-        rows.innerHTML = gradingCategoryRowMarkup({ id: newCategoryId(), name: "", weight: 100 }, true);
-    }
+    rows.innerHTML = sectionCategories.length > 0
+        ? sectionCategories.map(category => gradingCategoryRowMarkup(category)).join("")
+        : gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 100 });
     setGradingSetupError();
     updateGradingTotals();
     openModal("modal-grading-setup");
 }
 
 function addGradingCategoryRow() {
+    const section = document.getElementById("score-section")?.value || "";
     const rows = document.getElementById("grading-weight-rows");
     const wrapper = document.createElement("div");
-    wrapper.innerHTML = gradingCategoryRowMarkup({ id: newCategoryId(), name: "", weight: 0 }, true);
+    wrapper.innerHTML = gradingCategoryRowMarkup({ id: newCategoryId(), section, name: "", weight: 0 });
     const row = wrapper.firstElementChild;
     rows.appendChild(row);
     updateGradingTotals();
@@ -1945,7 +2103,6 @@ async function saveGradingSetup(event) {
     }
 
     const categories = [];
-    const selectedIds = [];
     const names = new Set();
     for (const row of rowElements) {
         const id = row.dataset.categoryId;
@@ -1957,7 +2114,7 @@ async function saveGradingSetup(event) {
             return;
         }
         if (names.has(nameKey)) {
-            setGradingSetupError(`Category names must be unique: ${name}.`);
+            setGradingSetupError(`Category names in ${section} must be unique: ${name}.`);
             return;
         }
         if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
@@ -1965,33 +2122,33 @@ async function saveGradingSetup(event) {
             return;
         }
         names.add(nameKey);
-        categories.push({ id, name, weight });
-        if (row.querySelector(".grading-category-use").checked) selectedIds.push(id);
+        categories.push({ id, section, name, weight });
     }
 
-    const globalTotal = categories.reduce((sum, category) => sum + category.weight, 0);
-    const selectedTotal = categories
-        .filter(category => selectedIds.includes(category.id))
-        .reduce((sum, category) => sum + category.weight, 0);
-    if (Math.abs(globalTotal - 100) > 0.001) {
-        setGradingSetupError(`All category weights must total 100%. Current total: ${Number(globalTotal.toFixed(2))}%.`);
-        return;
-    }
-    if (selectedIds.length === 0 || Math.abs(selectedTotal - 100) > 0.001) {
-        setGradingSetupError(`The categories selected for ${section} must total 100%. Current total: ${Number(selectedTotal.toFixed(2))}%.`);
+    const sectionTotal = categories.reduce((sum, category) => sum + category.weight, 0);
+    if (Math.abs(sectionTotal - 100) > 0.001) {
+        setGradingSetupError(`Category weights for ${section} must total 100%. Current total: ${Number(sectionTotal.toFixed(2))}%.`);
         return;
     }
 
-    state.gradeCategories = categories;
-    state.sectionGradeCategories[section] = selectedIds;
-    refreshScoreCategoryMetadata(categories);
+    state.gradeCategories = [
+        ...state.gradeCategories.filter(category => category.section !== section),
+        ...categories
+    ];
+    state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
+    refreshScoreCategoryMetadata(state.gradeCategories);
     localMutationSeq++;
     saveLocalStore();
     closeModal("modal-grading-setup");
     loadScoreSheet();
 
     if (cloudReady()) {
-        const synced = await trySync({ t: "gradingConfig", categories, section, selectedIds });
+        const synced = await trySync({
+            t: "gradingConfig",
+            section,
+            categories,
+            selectedIds: categories.map(c => c.id)
+        });
         if (!synced) return;
     }
     showToast(`Grading setup saved for ${section}.`, "success");
@@ -2295,10 +2452,10 @@ function openEditSectionModal(oldName) {
             if (selectedDirectorySection === oldName) {
                 selectedDirectorySection = newName;
             }
-            if (Object.prototype.hasOwnProperty.call(state.sectionGradeCategories, oldName)) {
-                state.sectionGradeCategories[newName] = state.sectionGradeCategories[oldName];
-                delete state.sectionGradeCategories[oldName];
-            }
+            state.gradeCategories.forEach(category => {
+                if (category.section === oldName) category.section = newName;
+            });
+            state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
 
             saveLocalStore();
             closeModal("modal-section");
@@ -2490,13 +2647,24 @@ function confirmDeleteSection(sec) {
     document.getElementById("delete-section-name").textContent = sec;
     document.getElementById("confirm-delete-section-btn").onclick = async () => {
         const codes = state.students.filter(s => s.section === sec).map(s => s.student_id);
+        const secCategoryIds = new Set(
+            state.gradeCategories.filter(c => c.section === sec).map(c => c.id)
+        );
 
         state.students = state.students.filter(s => s.section !== sec);
         Object.keys(state.attendance).forEach(k => {
             if (codes.includes(parseAttKey(k).studentId)) delete state.attendance[k];
         });
+        Object.keys(state.scores).forEach(k => {
+            const val = state.scores[k];
+            const sid = val?.student_id || parseScoreKey(k).studentId;
+            if (codes.includes(sid) || (val?.category_id && secCategoryIds.has(val.category_id))) {
+                delete state.scores[k];
+            }
+        });
         state.sections = state.sections.filter(s => s !== sec);
-        delete state.sectionGradeCategories[sec];
+        state.gradeCategories = state.gradeCategories.filter(c => c.section !== sec);
+        state.sectionGradeCategories = sanitizeSectionGradeCategories(null, state.gradeCategories);
         selectedDirectorySection = "ALL";
 
         saveLocalStore();

@@ -1514,7 +1514,7 @@ body.auth-pending {
     top: 0;
     z-index: 7;
     height: auto;
-    min-height: 86px;
+    min-height: 76px;
     padding: 9px 10px;
     background: var(--border-light);
     vertical-align: middle;
@@ -1564,15 +1564,6 @@ td.score-grid-student { padding: 8px 12px; }
     min-width: 142px;
     max-width: 142px;
     text-align: center;
-}
-
-.score-column-letter {
-    display: block;
-    margin-bottom: 2px;
-    color: var(--blue-text);
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
 }
 
 .score-category-heading strong,
@@ -1728,7 +1719,7 @@ td.score-grid-student { padding: 8px 12px; }
 .grading-weight-head,
 .grading-weight-row {
     display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) 118px;
+    grid-template-columns: minmax(0, 1fr) 118px 36px;
     align-items: center;
     gap: 10px;
 }
@@ -1742,9 +1733,31 @@ td.score-grid-student { padding: 8px 12px; }
     text-transform: uppercase;
 }
 
-.grading-weight-head span:last-child { text-align: center; }
-.grading-category-use { width: 20px; height: 20px; margin: 0 auto; accent-color: var(--primary); }
+.grading-weight-head span:nth-child(2) { text-align: center; }
 .grading-category-name { min-width: 0; }
+.grading-category-remove {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.grading-category-remove:hover {
+    border-color: var(--rose-border);
+    background: var(--rose-bg);
+    color: var(--rose-text);
+}
+
 .grading-weight-input { position: relative; }
 .grading-weight-input input { padding-right: 28px; text-align: right; }
 .grading-weight-input span {
@@ -1759,7 +1772,6 @@ td.score-grid-student { padding: 8px 12px; }
 
 .grading-add-category { align-self: flex-start; }
 .grading-totals { display: grid; grid-template-columns: 1fr; gap: 8px; }
-@media (min-width: 480px) { .grading-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .grading-weight-total {
     padding: 10px 12px;
     border: 1px solid var(--emerald-border);
